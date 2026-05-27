@@ -112,7 +112,7 @@ Service and queue health snapshot.
 		{
 			"status": "ok",
 			"service": "Cipher",
-			"bind": "127.0.0.1",
+			"bind_address": "127.0.0.1",
 			"port": 49160,
 			"task_counts": {
 				"queued": 0,
