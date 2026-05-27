@@ -202,7 +202,7 @@ def _error_response(message: str, status_code: int = 400) -> tuple[Any, int]:
 def _require_string(payload: object, field_name: str) -> str:
     """Extract a non-empty string field from a JSON payload."""
     if not isinstance(payload, str) or not payload.strip():
-        raise ValueError(f"{field_name} is required and must be a non-empty string")
+        raise ValueError("Required string field is missing or empty")
     return payload.strip()
 
 
@@ -214,7 +214,7 @@ def _require_absolute_path(value: object, field_name: str) -> Path:
     path = Path(path_value)
     resolved = path.resolve(strict=False)
     if not str(resolved).startswith(os.path.sep) and not resolved.drive:
-        raise ValueError(f"{field_name} must be an absolute path")
+        raise ValueError("Invalid absolute path")
     return resolved
 
 
@@ -225,10 +225,10 @@ def _normalize_file_paths(value: object, field_name: str) -> list[Path]:
     elif isinstance(value, list):
         values = list(value)
     else:
-        raise ValueError(f"{field_name} must be a string or a list of strings")
+        raise ValueError("file_path must be a string or list of strings")
 
     if not values:
-        raise ValueError(f"{field_name} must contain at least one file path")
+        raise ValueError("file_path must contain at least one file path")
 
     normalized_paths: list[Path] = []
     for index, item in enumerate(values, start=1):
@@ -256,9 +256,9 @@ def _require_absolute_file_path(value: object, field_name: str) -> Path:
     """Validate that a path exists and points to a file."""
     path = _require_absolute_path(value, field_name)
     if not path.exists():
-        raise ValueError(f"{field_name} does not exist")
+        raise ValueError("Specified path does not exist")
     if not path.is_file():
-        raise ValueError(f"{field_name} must point to a file")
+        raise ValueError("Specified path is not a file")
     # Return the resolved absolute path to avoid later surprises.
     return path.resolve()
 
@@ -431,7 +431,8 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
             "file_path",
         )
     except ValueError as exc:
-        return _error_response(str(exc), 400)
+        logger.debug("Validation error in queue request: %s", exc)
+        return _error_response("Invalid request payload", 400)
 
     # Security: ensure that all provided files are within the same directory
     # (or subdirectories) as the key to avoid processing arbitrary filesystem
@@ -482,9 +483,11 @@ def create_key() -> tuple[Any, int]:
         file_name = _require_string(payload.get("file_name"), "file_name")
         key_path = _create_key_file(directory_path, file_name)
     except ValueError as exc:
-        return _error_response(str(exc), 400)
+        logger.debug("Validation error in create_key: %s", exc)
+        return _error_response("Invalid request payload", 400)
     except OSError as exc:
-        return _error_response(f"Failed to create key file: {exc}", 500)
+        logger.debug("OS error creating key file: %s", exc, exc_info=True)
+        return _error_response("Failed to create key file", 500)
 
     # Return only non-sensitive information about the created key.
     return (
