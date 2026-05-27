@@ -16,11 +16,119 @@ Cipher is scoped to local file operations and keeps task state in memory while b
 3. Manual: run `python src/main.py` from the project root.
 
 ## API Endpoints
-- `POST /api/key` - Create a Fernet key file at a given absolute directory path.
-- `POST /api/encrypt` - Queue one or more file paths for encryption.
-- `POST /api/decrypt` - Queue one or more file paths for decryption.
-- `GET /api/task/<task_id>` - Check the status or result of a queued task.
-- `GET /api/health` - Return service health and task statistics.
+
+### `POST /api/key`
+Creates a new Fernet key file.
+
+- Body (JSON object):
+	- `directory_path` (string, required): absolute path to an existing directory where the key file should be created.
+	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
+- Returns:
+	- `201` ->
+		```json
+		{
+			"status": "created",
+			"directory_path": "C:/...",
+			"file_name": "mykey.key",
+			"key_path": "C:/.../mykey.key"
+		}
+		```
+	- `400` -> `{ "error": "Request body must be a JSON object." }`
+	- `400` -> `{ "error": "<validation-message>" }`
+	- `500` -> `{ "error": "Failed to create key file: <os-error>" }`
+
+### `POST /api/encrypt`
+Queues one encryption task executed in a background thread.
+
+- Body (JSON object):
+	- `key_path` (string, required): absolute path to existing key file.
+	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to encrypt.
+	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
+- Returns:
+	- `202` ->
+		```json
+		{
+			"task_id": "<uuid>",
+			"status": "queued",
+			"operation": "encrypt",
+			"file_count": 2
+		}
+		```
+	- `400` -> `{ "error": "Request body must be a JSON object." }`
+	- `400` -> `{ "error": "<validation-message>" }`
+	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
+
+### `POST /api/decrypt`
+Queues one decryption task executed in a background thread.
+
+- Body (JSON object):
+	- `key_path` (string, required): absolute path to existing key file.
+	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to decrypt.
+	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
+- Returns:
+	- `202` ->
+		```json
+		{
+			"task_id": "<uuid>",
+			"status": "queued",
+			"operation": "decrypt",
+			"file_count": 1
+		}
+		```
+	- `400` -> `{ "error": "Request body must be a JSON object." }`
+	- `400` -> `{ "error": "<validation-message>" }`
+	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
+
+### `GET /api/task/<task_id>`
+Returns current task state and final result/error once finished.
+
+- Path parameters:
+	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
+- Returns:
+	- `200` ->
+		```json
+		{
+			"task_id": "<uuid>",
+			"operation": "encrypt",
+			"status": "queued|in_progress|completed|failed",
+			"result": {
+				"operation": "encrypt",
+				"file_count": 1,
+				"files": [{ "input_path": "...", "output_path": "..." }]
+			},
+			"error": "<failure-reason>"
+		}
+		```
+		Notes: `result` is present only for completed tasks; `error` only for failed tasks.
+	- `404` -> `{ "error": "Task not found." }`
+
+### `GET /api/health`
+Service and queue health snapshot.
+
+- Body: none
+- Returns:
+	- `200` ->
+		```json
+		{
+			"status": "ok",
+			"service": "Cipher",
+			"bind": "127.0.0.1",
+			"port": 49160,
+			"task_counts": {
+				"queued": 0,
+				"in_progress": 0,
+				"completed": 0,
+				"failed": 0,
+				"total": 0
+			},
+			"task_retention_minutes": 60,
+			"task_cleanup_interval_seconds": 60,
+			"cipher_algorithm": "fernet",
+			"hostname": "...",
+			"primary_ip": "...",
+			"local_ips": ["..."]
+		}
+		```
 
 ## License
 - [LICENSE](LICENSE)
