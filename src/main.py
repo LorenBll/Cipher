@@ -238,6 +238,20 @@ def _normalize_file_paths(value: object, field_name: str) -> list[Path]:
     return normalized_paths
 
 
+def _is_within_directory(child: Path, parent: Path) -> bool:
+    """Return True if `child` is inside `parent` (or equal), after resolving."""
+    try:
+        child_resolved = child.resolve()
+        parent_resolved = parent.resolve()
+    except Exception:
+        return False
+    try:
+        child_resolved.relative_to(parent_resolved)
+        return True
+    except Exception:
+        return False
+
+
 def _require_absolute_file_path(value: object, field_name: str) -> Path:
     """Validate that a path exists and points to a file."""
     path = _require_absolute_path(value, field_name)
@@ -418,6 +432,14 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
         )
     except ValueError as exc:
         return _error_response(str(exc), 400)
+
+    # Security: ensure that all provided files are within the same directory
+    # (or subdirectories) as the key to avoid processing arbitrary filesystem
+    # locations supplied by untrusted clients.
+    key_dir = key_path.parent
+    for p in file_paths:
+        if not _is_within_directory(p, key_dir):
+            return _error_response("All file paths must be located under the key file's directory.", 400)
 
     task = _create_task(operation, key_path, file_paths)
 
