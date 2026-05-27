@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd plist for Cipher. Update paths before installation. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cipher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/Cipher/.venv/bin/python</string>
+        <string>/path/to/Cipher/src/main.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/path/to/Cipher</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/cipher.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/cipher.error.log</string>
+</dict>
+</plist>

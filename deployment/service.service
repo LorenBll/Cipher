@@ -1,0 +1,16 @@
+# systemd unit for Cipher. Update user and paths before installation.
+
+[Unit]
+Description=Cipher
+After=network.target
+
+[Service]
+Type=simple
+User=yourusername
+WorkingDirectory=/path/to/Cipher
+ExecStart=/path/to/Cipher/.venv/bin/python src/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
