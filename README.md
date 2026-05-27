@@ -1,6 +1,6 @@
 # Cipher
 
-Cipher is a local Flask service for Fernet-based file encryption and decryption. It binds to loopback, reads runtime configuration from `resources/configuration.json`, and processes encryption and decryption in background tasks.
+Cipher is a local Flask service for Fernet-based file encryption and decryption. It validates single or batch encryption/decryption requests, runs background tasks, and exposes task status through polling.
 
 ## About
 
