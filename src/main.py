@@ -52,22 +52,19 @@ def _utc_iso() -> str:
 def _load_configuration() -> dict[str, Any]:
     """Load configuration from resources/configuration.json."""
     if not CONFIG_PATH.exists():
-        raise FileNotFoundError(
-            f"Configuration file not found at {CONFIG_PATH}. "
-            "Ensure resources/configuration.json exists."
-        )
+        # Avoid exposing full filesystem paths in exception messages.
+        logger.debug("Configuration file missing: %s", CONFIG_PATH)
+        raise FileNotFoundError("Configuration file not found. Ensure configuration.json exists.")
 
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as config_file:
             config = json.load(config_file)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Configuration file at {CONFIG_PATH} contains invalid JSON: {exc}"
-        ) from exc
+        logger.debug("Invalid JSON in configuration file %s: %s", CONFIG_PATH, exc)
+        raise ValueError("Configuration file contains invalid JSON") from exc
     except Exception as exc:
-        raise RuntimeError(
-            f"Failed to read configuration file at {CONFIG_PATH}: {exc}"
-        ) from exc
+        logger.debug("Failed to read configuration file %s: %s", CONFIG_PATH, exc)
+        raise RuntimeError("Failed to read configuration file") from exc
 
     return config
 
@@ -212,10 +209,13 @@ def _require_string(payload: object, field_name: str) -> str:
 def _require_absolute_path(value: object, field_name: str) -> Path:
     """Validate that a payload field is an absolute filesystem path."""
     path_value = _require_string(value, field_name)
+    # Use resolve(strict=False) to canonicalize the path without requiring
+    # it to exist yet. This helps avoid path traversal tricks such as '..'.
     path = Path(path_value)
-    if not path.is_absolute():
+    resolved = path.resolve(strict=False)
+    if not str(resolved).startswith(os.path.sep) and not resolved.drive:
         raise ValueError(f"{field_name} must be an absolute path")
-    return path
+    return resolved
 
 
 def _normalize_file_paths(value: object, field_name: str) -> list[Path]:
@@ -245,7 +245,8 @@ def _require_absolute_file_path(value: object, field_name: str) -> Path:
         raise ValueError(f"{field_name} does not exist")
     if not path.is_file():
         raise ValueError(f"{field_name} must point to a file")
-    return path
+    # Return the resolved absolute path to avoid later surprises.
+    return path.resolve()
 
 
 def _resolve_unique_path(directory: Path, file_name: str) -> Path:
@@ -271,7 +272,8 @@ def _load_fernet(key_path: Path) -> Fernet:
     """Load a Fernet instance from a key file."""
     key_bytes = key_path.read_bytes().strip()
     if not key_bytes:
-        raise ValueError(f"Key file at {key_path} is empty")
+        logger.debug("Key file appears empty: %s", key_path)
+        raise ValueError("Key file is empty")
     return Fernet(key_bytes)
 
 
@@ -296,17 +298,19 @@ def _decryption_output_path(source_path: Path) -> Path:
 
 def _create_key_file(directory_path: Path, file_name: str) -> Path:
     """Create a Fernet key file after validating the destination."""
-    if any(separator in file_name for separator in ("/", "\\")):
-        raise ValueError("file_name must be a file name only, not a path")
+    # Ensure file_name is a simple filename (no directories or traversal).
+    safe_name = Path(file_name).name
+    if safe_name != file_name or file_name in {".", ".."}:
+        raise ValueError("file_name must be a simple file name without path components")
 
     if not directory_path.exists():
-        raise ValueError(f"directory_path does not exist: {directory_path}")
+        raise ValueError("directory_path does not exist")
     if not directory_path.is_dir():
-        raise ValueError(f"directory_path must point to a directory: {directory_path}")
+        raise ValueError("directory_path must point to a directory")
 
-    key_path = directory_path / file_name
+    key_path = directory_path / safe_name
     if key_path.exists():
-        raise ValueError(f"A file named {file_name!r} already exists in {directory_path}")
+        raise ValueError("A file with that name already exists in the destination directory")
 
     key_path.write_bytes(Fernet.generate_key())
     return key_path
@@ -324,8 +328,9 @@ def _create_task(operation: str, key_path: Path, file_paths: list[Path]) -> dict
             "status": "queued",
             "created_at": now,
             "updated_at": now,
-            "key_path": str(key_path),
-            "file_paths": [str(path) for path in file_paths],
+            # Store only basenames for any paths to avoid leaking local filesystem layout.
+            "key_path": key_path.name,
+            "file_paths": [path.name for path in file_paths],
         }
 
     return jobs[task_id]
@@ -342,9 +347,12 @@ def _finalize_task_success(task_id: str, result: dict[str, Any]) -> None:
 
 def _finalize_task_failure(task_id: str, error_message: str) -> None:
     """Mark a task as failed."""
+    # Store a short, non-sensitive error message for API consumers. Detailed
+    # exception info is logged at debug level for operators.
+    sanitized = "Task failed during processing"
     with jobs_lock:
         jobs[task_id]["status"] = "failed"
-        jobs[task_id]["error"] = error_message
+        jobs[task_id]["error"] = sanitized
         jobs[task_id]["updated_at"] = _utc_iso()
         jobs[task_id]["finished_at_unix"] = time.time()
 
@@ -369,10 +377,12 @@ def _cipher_worker(task_id: str, operation: str, key_path: Path, file_paths: lis
             else:
                 raise ValueError(f"Unsupported operation: {operation}")
 
+            # Only keep file names in the recorded result to avoid leaking
+            # absolute paths in the API.
             processed_files.append(
                 {
-                    "input_path": str(source_path),
-                    "output_path": str(output_path),
+                    "input_name": source_path.name,
+                    "output_name": output_path.name,
                 }
             )
 
@@ -385,9 +395,11 @@ def _cipher_worker(task_id: str, operation: str, key_path: Path, file_paths: lis
             },
         )
     except InvalidToken as exc:
-        _finalize_task_failure(task_id, f"Invalid Fernet key or encrypted file: {exc}")
+        logger.debug("InvalidToken while processing task %s: %s", task_id, exc)
+        _finalize_task_failure(task_id, "Invalid Fernet key or encrypted file")
     except Exception as exc:
-        _finalize_task_failure(task_id, str(exc))
+        logger.debug("Unhandled exception in _cipher_worker for task %s: %s", task_id, exc, exc_info=True)
+        _finalize_task_failure(task_id, "An internal error occurred while processing the task")
 
 
 def _queue_cipher_task(operation: str) -> tuple[Any, int]:
@@ -418,7 +430,8 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
         )
         worker_thread.start()
     except Exception as exc:
-        _finalize_task_failure(task["task_id"], f"Failed to start worker thread: {exc}")
+        logger.debug("Failed to start worker thread for task %s: %s", task["task_id"], exc, exc_info=True)
+        _finalize_task_failure(task["task_id"], "Failed to start background worker")
         return _error_response(
             "Could not start the background worker. The server may be under heavy load.",
             500,
@@ -451,15 +464,9 @@ def create_key() -> tuple[Any, int]:
     except OSError as exc:
         return _error_response(f"Failed to create key file: {exc}", 500)
 
+    # Return only non-sensitive information about the created key.
     return (
-        jsonify(
-            {
-                "status": "created",
-                "directory_path": str(directory_path),
-                "file_name": file_name,
-                "key_path": str(key_path),
-            }
-        ),
+        jsonify({"status": "created", "file_name": file_name}),
         201,
     )
 
