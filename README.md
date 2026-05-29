@@ -45,6 +45,11 @@ Queues one encryption task executed in a background thread.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to encrypt.
 	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
 	- `encrypt_file_name` (boolean, required): if `true`, encrypts the file name itself and returns the resulting absolute output path in the task result.
+	- `overwrite_file` (boolean, optional, default `false`): if `true`, encrypted content is written into the source file before any optional rename.
+	- `output_file_path` (string, optional unless required by rule below): absolute output file path for one input file.
+	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
+	- Requirement rule: when `encrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
+	- Output path safety: output paths must be under the key file directory. If `overwrite_file` is `false`, output paths must not already exist.
 - Returns:
 	- `202` ->
 		```json
@@ -67,6 +72,11 @@ Queues one decryption task executed in a background thread.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to decrypt.
 	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
 	- `decrypt_file_name` (boolean, required): if `true`, decrypts the file name itself and returns the resulting absolute output path in the task result.
+	- `overwrite_file` (boolean, optional, default `false`): if `true`, decrypted content is written into the source file before any optional rename.
+	- `output_file_path` (string, optional unless required by rule below): absolute output file path for one input file.
+	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
+	- Requirement rule: when `decrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
+	- Output path safety: output paths must be under the key file directory. If `overwrite_file` is `false`, output paths must not already exist.
 - Returns:
 	- `202` ->
 		```json
@@ -104,6 +114,7 @@ Returns current task state and final result/error once finished.
 		}
 		```
 		Notes: `result` is present only for completed tasks; `error` only for failed tasks. When `encrypt_file_name` or `decrypt_file_name` is `true`, each file entry uses `input_path` and `output_path` with absolute paths instead of the name-only fields.
+		When filename transformation is disabled, each file entry still returns `input_name` and `output_name`; `output_name` matches the requested output file name or the final renamed file when `overwrite_file` is used.
 	- `404` -> `{ "error": "Task not found." }`
 
 ### `GET /api/health`

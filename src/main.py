@@ -245,6 +245,39 @@ def _normalize_file_paths(value: object, field_name: str) -> list[Path]:
     return normalized_paths
 
 
+def _normalize_output_paths(
+    value: object,
+    field_name: str,
+    expected_count: int,
+) -> list[Path] | None:
+    """Normalize optional output file path(s) for a task request."""
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        values: list[object] = [value]
+    elif isinstance(value, list):
+        values = list(value)
+    else:
+        raise ValueError(f"{field_name} must be a string or list of strings")
+
+    if not values:
+        raise ValueError(f"{field_name} must contain at least one file path")
+
+    if len(values) != expected_count:
+        raise ValueError(f"{field_name} must include exactly one path per input file")
+
+    normalized_paths: list[Path] = []
+    for index, item in enumerate(values, start=1):
+        output_path = _require_absolute_path(item, f"{field_name}[{index}]")
+        parent = output_path.parent
+        if not parent.exists() or not parent.is_dir():
+            raise ValueError("Output directory does not exist")
+        normalized_paths.append(output_path)
+
+    return normalized_paths
+
+
 def _is_within_directory(child: Path, parent: Path) -> bool:
     """Return True if `child` is inside `parent` (or equal), after resolving."""
     try:
@@ -394,6 +427,8 @@ def _cipher_worker(
     key_path: Path,
     file_paths: list[Path],
     transform_file_name: bool,
+    overwrite_source_file: bool,
+    output_paths: list[Path] | None,
 ) -> None:
     """Process encryption or decryption work in the background."""
     with jobs_lock:
@@ -404,23 +439,46 @@ def _cipher_worker(
         fernet = _load_fernet(key_path)
         processed_files: list[dict[str, str]] = []
 
-        for source_path in file_paths:
-            if operation == "encrypt":
-                if transform_file_name:
+        for index, source_path in enumerate(file_paths):
+            requested_output_path = output_paths[index] if output_paths else None
+
+            if requested_output_path is not None:
+                target_output_path = requested_output_path
+            elif transform_file_name:
+                if operation == "encrypt":
                     output_name = _encrypted_file_name(source_path.name, fernet)
-                    output_path = _resolve_unique_path(source_path.parent, output_name)
-                else:
-                    output_path = _encryption_output_path(source_path)
-                output_path.write_bytes(fernet.encrypt(source_path.read_bytes()))
-            elif operation == "decrypt":
-                if transform_file_name:
+                elif operation == "decrypt":
                     output_name = _decrypted_file_name(source_path.name, fernet)
-                    output_path = _resolve_unique_path(source_path.parent, output_name)
                 else:
-                    output_path = _decryption_output_path(source_path)
-                output_path.write_bytes(fernet.decrypt(source_path.read_bytes()))
+                    raise ValueError(f"Unsupported operation: {operation}")
+                target_output_path = _resolve_unique_path(source_path.parent, output_name)
+            elif overwrite_source_file:
+                target_output_path = source_path
+            else:
+                raise ValueError("Missing output file path for non-filename transformation")
+
+            if operation == "encrypt":
+                transformed_bytes = fernet.encrypt(source_path.read_bytes())
+            elif operation == "decrypt":
+                transformed_bytes = fernet.decrypt(source_path.read_bytes())
             else:
                 raise ValueError(f"Unsupported operation: {operation}")
+
+            if overwrite_source_file:
+                source_path.write_bytes(transformed_bytes)
+
+                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False):
+                    if target_output_path.exists():
+                        raise ValueError("Requested output path already exists")
+                    source_path.rename(target_output_path)
+                    output_path = target_output_path
+                else:
+                    output_path = source_path
+            else:
+                if target_output_path.exists():
+                    raise ValueError("Requested output path already exists")
+                target_output_path.write_bytes(transformed_bytes)
+                output_path = target_output_path
 
             if transform_file_name:
                 processed_files.append(
@@ -471,6 +529,22 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
         )
         transform_field_name = "encrypt_file_name" if operation == "encrypt" else "decrypt_file_name"
         transform_file_name = _require_boolean(payload.get(transform_field_name), transform_field_name)
+
+        overwrite_raw = payload.get("overwrite_file", False)
+        if not isinstance(overwrite_raw, bool):
+            raise ValueError("overwrite_file must be a boolean")
+        overwrite_source_file = overwrite_raw
+
+        output_paths = _normalize_output_paths(
+            payload.get("output_file_path", payload.get("output_file_paths")),
+            "output_file_path",
+            len(file_paths),
+        )
+
+        if not transform_file_name and not overwrite_source_file and output_paths is None:
+            raise ValueError(
+                "output_file_path is required when filename transformation is disabled and overwrite_file is false"
+            )
     except ValueError as exc:
         logger.debug("Validation error in queue request: %s", exc)
         return _error_response("Invalid request payload", 400)
@@ -483,12 +557,37 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
         if not _is_within_directory(p, key_dir):
             return _error_response("All file paths must be located under the key file's directory.", 400)
 
+    if output_paths:
+        for source_path, output_path in zip(file_paths, output_paths):
+            if not _is_within_directory(output_path, key_dir):
+                return _error_response(
+                    "All output file paths must be located under the key file's directory.",
+                    400,
+                )
+
+            if (
+                not overwrite_source_file
+                and output_path.resolve(strict=False) == source_path.resolve(strict=False)
+            ):
+                return _error_response(
+                    "output_file_path cannot match the input file path unless overwrite_file is true.",
+                    400,
+                )
+
     task = _create_task(operation, key_path, file_paths)
 
     try:
         worker_thread = Thread(
             target=_cipher_worker,
-            args=(task["task_id"], operation, key_path, file_paths, transform_file_name),
+            args=(
+                task["task_id"],
+                operation,
+                key_path,
+                file_paths,
+                transform_file_name,
+                overwrite_source_file,
+                output_paths,
+            ),
             name=f"cipher-{operation}-worker-{task['task_id']}",
             daemon=False,
         )
