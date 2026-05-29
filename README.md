@@ -84,6 +84,9 @@ Queues one decryption task executed in a background thread.
 	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
 	- Requirement rule: when `decrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
 	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
+	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
+	- Note: the file referenced by `key_path` must not be included in the `file_path`/`file_paths` input or in `output_file_path`/`output_file_paths`. The server will reject requests that attempt to process the key file itself.
+	- Note: the file referenced by `key_path` must not be included in the `file_path`/`file_paths` input or in `output_file_path`/`output_file_paths`. The server will reject requests that attempt to process the key file itself.
 - Returns:
 	- `202` ->
 		```json

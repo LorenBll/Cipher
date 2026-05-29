@@ -642,6 +642,29 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
                     400,
                 )
 
+    # SECURITY: Prevent the provided key file from being processed as an
+    # input or output file. Encrypting or decrypting the key file itself
+    # would corrupt the key material and is not allowed.
+    try:
+        key_resolved = key_path.resolve(strict=False)
+    except Exception:
+        key_resolved = key_path
+
+    for p in file_paths:
+        try:
+            if p.resolve(strict=False) == key_resolved:
+                return _error_response("The key file may not be used as an input file.", 400)
+        except Exception:
+            continue
+
+    if output_paths:
+        for out in output_paths:
+            try:
+                if out.resolve(strict=False) == key_resolved:
+                    return _error_response("The key file may not be used as an output file.", 400)
+            except Exception:
+                continue
+
     task = _create_task(operation, key_path, file_paths)
 
     try:
