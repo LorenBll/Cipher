@@ -7,7 +7,22 @@ Cipher is scoped to local file operations and keeps task state in memory while b
 
 ## Setup
 1. Install the Python dependencies with `pip install -r requirements.txt`.
-2. Review `resources/configuration.json` if you want to change the port.
+2. Review `resources/configuration.json` to configure `port`, `allowed_roots`, and `blacklisted_roots`.
+		- `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
+		- `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If `allowed_roots` is empty and `blacklisted_roots` is non-empty, any path inside a blacklisted root is forbidden.
+		- Behavior summary:
+			- If `allowed_roots` is non-empty → only those roots are permitted (blacklist ignored).
+			- Else if `blacklisted_roots` is non-empty → all paths are permitted except any inside a blacklisted root.
+			- Else (both lists empty) → all paths on the system are permitted.
+
+		Example `resources/configuration.json`:
+		```json
+		{
+			"port": 49160,
+			"allowed_roots": [],
+			"blacklisted_roots": []
+		}
+		```
 3. Leave the project structure intact so the service can find `resources/` and `src/`.
 
 ## Run
@@ -21,21 +36,13 @@ Cipher is scoped to local file operations and keeps task state in memory while b
 Creates a new Fernet key file.
 
 - Body (JSON object):
-	- `directory_path` (string, required): absolute path to an existing directory where the key file should be created.
-	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
+  	- `directory_path` (string, optional): absolute path to an existing directory where the key file should be created. If omitted, defaults to the repository root. The chosen directory must be permitted by the server policy (`allowed_roots` / `blacklisted_roots`).
+ 	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
 - Returns:
-	- `201` ->
-		```json
-		{
-			"status": "created",
-			"directory_path": "C:/...",
-			"file_name": "mykey.key",
-			"key_path": "C:/.../mykey.key"
-		}
-		```
-	- `400` -> `{ "error": "Request body must be a JSON object." }`
-	- `400` -> `{ "error": "<validation-message>" }`
-	- `500` -> `{ "error": "Failed to create key file: <os-error>" }`
+ 	- `201` -> `{ "status": "created", "file_name": "mykey.key" }`
+ 	- `400` -> `{ "error": "Request body must be a JSON object." }`
+ 	- `400` -> `{ "error": "<validation-message>" }`
+ 	- `500` -> `{ "error": "Failed to create key file" }`
 
 ### `POST /api/encrypt`
 Queues one encryption task executed in a background thread.
@@ -49,7 +56,7 @@ Queues one encryption task executed in a background thread.
 	- `output_file_path` (string, optional unless required by rule below): absolute output file path for one input file.
 	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
 	- Requirement rule: when `encrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
-	- Output path safety: output paths must be under the key file directory. If `overwrite_file` is `false`, output paths must not already exist.
+ 	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
 - Returns:
 	- `202` ->
 		```json
@@ -76,7 +83,7 @@ Queues one decryption task executed in a background thread.
 	- `output_file_path` (string, optional unless required by rule below): absolute output file path for one input file.
 	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
 	- Requirement rule: when `decrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
-	- Output path safety: output paths must be under the key file directory. If `overwrite_file` is `false`, output paths must not already exist.
+	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
 - Returns:
 	- `202` ->
 		```json
