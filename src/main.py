@@ -22,6 +22,8 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "configurat
 SERVICE_BIND_ADDRESS = "127.0.0.1"
 DEFAULT_SERVICE_PORT = 49160
 SERVICE_PORT: int | None = None
+ALLOWED_ROOTS: list[Path] = []
+BLACKLISTED_ROOTS: list[Path] = []
 
 try:
     TASK_RETENTION_MINUTES = int(os.getenv("TASK_RETENTION_MINUTES", "30"))
@@ -69,9 +71,18 @@ def _load_configuration() -> dict[str, Any]:
     return config
 
 
+def _is_within_any_directory(child: Path, parents: list[Path]) -> bool:
+    """Return True if `child` is inside any of the `parents` (or equal), after resolving."""
+    for parent in parents:
+        if _is_within_directory(child, parent):
+            return True
+    return False
+
+
 def _initialize_service_config() -> None:
     """Load and validate the service configuration."""
     global SERVICE_PORT
+    global ALLOWED_ROOTS, BLACKLISTED_ROOTS
 
     config = _load_configuration()
     configured_port = config.get("port", DEFAULT_SERVICE_PORT)
@@ -83,6 +94,63 @@ def _initialize_service_config() -> None:
         raise ValueError("port in configuration.json must be an integer")
 
     SERVICE_PORT = configured_port
+
+    # Configure allowed file roots and blacklisted paths. Defaults are
+    # intentionally conservative: allowed roots default to the repository
+    # root, and blacklist defaults to empty (no blacklist).
+    repo_root = Path(__file__).resolve().parent.parent
+    allowed_roots = []
+    cfg_allowed = config.get("allowed_roots")
+    if isinstance(cfg_allowed, list) and cfg_allowed:
+        for item in cfg_allowed:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            p = Path(item)
+            if not p.is_absolute():
+                p = (repo_root / p).resolve(strict=False)
+            allowed_roots.append(p.resolve())
+    else:
+        # No allowed roots configured means "no allowlist"; leave empty
+        # so blacklist (if present) is used as the only restriction.
+        allowed_roots = []
+
+    ALLOWED_ROOTS = allowed_roots
+    # Parse blacklisted roots
+    blacklist: list[Path] = []
+    cfg_black = config.get("blacklisted_roots")
+    if isinstance(cfg_black, list) and cfg_black:
+        for item in cfg_black:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            p = Path(item)
+            if not p.is_absolute():
+                p = (repo_root / p).resolve(strict=False)
+            blacklist.append(p.resolve())
+
+    BLACKLISTED_ROOTS = blacklist
+
+
+def _is_path_permitted(path: Path) -> bool:
+    """Return True if `path` is permitted by the allowlist/blacklist policy.
+
+    Policy:
+    - If `ALLOWED_ROOTS` is non-empty: the path must be inside one of those roots.
+    - Otherwise, if `BLACKLISTED_ROOTS` is non-empty: the path must NOT be inside any blacklisted root.
+    - Otherwise: everything is permitted.
+    """
+    try:
+        resolved = path.resolve()
+    except Exception:
+        # If we cannot resolve, deny for safety.
+        return False
+
+    if ALLOWED_ROOTS:
+        return _is_within_any_directory(resolved, ALLOWED_ROOTS)
+
+    if BLACKLISTED_ROOTS:
+        return not _is_within_any_directory(resolved, BLACKLISTED_ROOTS)
+
+    return True
 
 
 def _collect_local_ip_addresses() -> list[str]:
@@ -548,20 +616,20 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
     except ValueError as exc:
         logger.debug("Validation error in queue request: %s", exc)
         return _error_response("Invalid request payload", 400)
+    # Enforce policy: key_path, input and output paths must be permitted
+    # according to allowlist/blacklist rules configured in `configuration.json`.
+    if not _is_path_permitted(key_path):
+        return _error_response("Provided key_path is not permitted by server policy.", 400)
 
-    # Security: ensure that all provided files are within the same directory
-    # (or subdirectories) as the key to avoid processing arbitrary filesystem
-    # locations supplied by untrusted clients.
-    key_dir = key_path.parent
     for p in file_paths:
-        if not _is_within_directory(p, key_dir):
-            return _error_response("All file paths must be located under the key file's directory.", 400)
+        if not _is_path_permitted(p):
+            return _error_response("All file paths must be permitted by server policy.", 400)
 
     if output_paths:
         for source_path, output_path in zip(file_paths, output_paths):
-            if not _is_within_directory(output_path, key_dir):
+            if not _is_path_permitted(output_path):
                 return _error_response(
-                    "All output file paths must be located under the key file's directory.",
+                    "All output file paths must be permitted by server policy.",
                     400,
                 )
 
@@ -619,8 +687,20 @@ def create_key() -> tuple[Any, int]:
         return _error_response("Request body must be a JSON object.", 400)
 
     try:
-        directory_path = _require_absolute_path(payload.get("directory_path"), "directory_path")
+        # Create a key file at the requested directory (or repo root if
+        # omitted). The chosen directory must be permitted by the server
+        # policy (allowed roots / blacklist).
         file_name = _require_string(payload.get("file_name"), "file_name")
+        provided_dir = payload.get("directory_path")
+        repo_root = Path(__file__).resolve().parent.parent
+        if provided_dir is None:
+            directory_path = repo_root
+        else:
+            directory_path = _require_absolute_path(provided_dir, "directory_path")
+
+        if not _is_path_permitted(directory_path):
+            raise ValueError("directory_path is not permitted by server policy")
+
         key_path = _create_key_file(directory_path, file_name)
     except ValueError as exc:
         logger.debug("Validation error in create_key: %s", exc)
