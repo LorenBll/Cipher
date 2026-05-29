@@ -206,6 +206,13 @@ def _require_string(payload: object, field_name: str) -> str:
     return payload.strip()
 
 
+def _require_boolean(payload: object, field_name: str) -> bool:
+    """Extract a boolean field from a JSON payload."""
+    if not isinstance(payload, bool):
+        raise ValueError("Required boolean field is missing or invalid")
+    return payload
+
+
 def _require_absolute_path(value: object, field_name: str) -> Path:
     """Validate that a payload field is an absolute filesystem path."""
     path_value = _require_string(value, field_name)
@@ -296,6 +303,11 @@ def _encryption_output_path(source_path: Path) -> Path:
     return _resolve_unique_path(source_path.parent, f"{source_path.name}.fernet")
 
 
+def _encrypted_file_name(source_name: str, fernet: Fernet) -> str:
+    """Encrypt a file name using the provided Fernet instance."""
+    return fernet.encrypt(source_name.encode("utf-8")).decode("ascii")
+
+
 def _decryption_output_path(source_path: Path) -> Path:
     """Build an output path for decrypted files."""
     if source_path.name.endswith(".fernet"):
@@ -308,6 +320,11 @@ def _decryption_output_path(source_path: Path) -> Path:
         source_path.parent,
         f"{source_path.name}.decrypted",
     )
+
+
+def _decrypted_file_name(source_name: str, fernet: Fernet) -> str:
+    """Decrypt a file name using the provided Fernet instance."""
+    return fernet.decrypt(source_name.encode("ascii")).decode("utf-8")
 
 
 def _create_key_file(directory_path: Path, file_name: str) -> Path:
@@ -371,7 +388,13 @@ def _finalize_task_failure(task_id: str, error_message: str) -> None:
         jobs[task_id]["finished_at_unix"] = time.time()
 
 
-def _cipher_worker(task_id: str, operation: str, key_path: Path, file_paths: list[Path]) -> None:
+def _cipher_worker(
+    task_id: str,
+    operation: str,
+    key_path: Path,
+    file_paths: list[Path],
+    transform_file_name: bool,
+) -> None:
     """Process encryption or decryption work in the background."""
     with jobs_lock:
         jobs[task_id]["status"] = "in_progress"
@@ -383,22 +406,38 @@ def _cipher_worker(task_id: str, operation: str, key_path: Path, file_paths: lis
 
         for source_path in file_paths:
             if operation == "encrypt":
-                output_path = _encryption_output_path(source_path)
+                if transform_file_name:
+                    output_name = _encrypted_file_name(source_path.name, fernet)
+                    output_path = _resolve_unique_path(source_path.parent, output_name)
+                else:
+                    output_path = _encryption_output_path(source_path)
                 output_path.write_bytes(fernet.encrypt(source_path.read_bytes()))
             elif operation == "decrypt":
-                output_path = _decryption_output_path(source_path)
+                if transform_file_name:
+                    output_name = _decrypted_file_name(source_path.name, fernet)
+                    output_path = _resolve_unique_path(source_path.parent, output_name)
+                else:
+                    output_path = _decryption_output_path(source_path)
                 output_path.write_bytes(fernet.decrypt(source_path.read_bytes()))
             else:
                 raise ValueError(f"Unsupported operation: {operation}")
 
-            # Only keep file names in the recorded result to avoid leaking
-            # absolute paths in the API.
-            processed_files.append(
-                {
-                    "input_name": source_path.name,
-                    "output_name": output_path.name,
-                }
-            )
+            if transform_file_name:
+                processed_files.append(
+                    {
+                        "input_path": str(source_path.resolve()),
+                        "output_path": str(output_path.resolve()),
+                    }
+                )
+            else:
+                # Only keep file names in the recorded result to avoid leaking
+                # absolute paths in the API.
+                processed_files.append(
+                    {
+                        "input_name": source_path.name,
+                        "output_name": output_path.name,
+                    }
+                )
 
         _finalize_task_success(
             task_id,
@@ -430,6 +469,8 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
             payload.get("file_path", payload.get("file_paths")),
             "file_path",
         )
+        transform_field_name = "encrypt_file_name" if operation == "encrypt" else "decrypt_file_name"
+        transform_file_name = _require_boolean(payload.get(transform_field_name), transform_field_name)
     except ValueError as exc:
         logger.debug("Validation error in queue request: %s", exc)
         return _error_response("Invalid request payload", 400)
@@ -447,7 +488,7 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
     try:
         worker_thread = Thread(
             target=_cipher_worker,
-            args=(task["task_id"], operation, key_path, file_paths),
+            args=(task["task_id"], operation, key_path, file_paths, transform_file_name),
             name=f"cipher-{operation}-worker-{task['task_id']}",
             daemon=False,
         )

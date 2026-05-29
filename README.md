@@ -44,6 +44,7 @@ Queues one encryption task executed in a background thread.
 	- `key_path` (string, required): absolute path to existing key file.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to encrypt.
 	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
+	- `encrypt_file_name` (boolean, required): if `true`, encrypts the file name itself and returns the resulting absolute output path in the task result.
 - Returns:
 	- `202` ->
 		```json
@@ -65,6 +66,7 @@ Queues one decryption task executed in a background thread.
 	- `key_path` (string, required): absolute path to existing key file.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to decrypt.
 	- `file_paths` (array of strings, optional alias): alternative to `file_path`.
+	- `decrypt_file_name` (boolean, required): if `true`, decrypts the file name itself and returns the resulting absolute output path in the task result.
 - Returns:
 	- `202` ->
 		```json
@@ -94,12 +96,14 @@ Returns current task state and final result/error once finished.
 			"result": {
 				"operation": "encrypt",
 				"file_count": 1,
-				"files": [{ "input_path": "...", "output_path": "..." }]
+				"files": [
+					{ "input_name": "...", "output_name": "..." }
+				]
 			},
 			"error": "<failure-reason>"
 		}
 		```
-		Notes: `result` is present only for completed tasks; `error` only for failed tasks.
+		Notes: `result` is present only for completed tasks; `error` only for failed tasks. When `encrypt_file_name` or `decrypt_file_name` is `true`, each file entry uses `input_path` and `output_path` with absolute paths instead of the name-only fields.
 	- `404` -> `{ "error": "Task not found." }`
 
 ### `GET /api/health`
