@@ -14,6 +14,8 @@ from typing import Any
 from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
+import struct
+import tempfile
 from flask import Flask, jsonify, request
 
 logger = logging.getLogger(__name__)
@@ -404,6 +406,80 @@ def _encryption_output_path(source_path: Path) -> Path:
     return _resolve_unique_path(source_path.parent, f"{source_path.name}.fernet")
 
 
+# Streaming format constants
+# Magic header to identify files encrypted with chunked Fernet format
+_CHUNKED_MAGIC = b"FRTN1"
+# Use 1 MiB chunks by default for streaming to limit memory usage
+_STREAM_CHUNK_SIZE = 1024 * 1024
+
+
+def _stream_encrypt_file(source_path: Path, target_output_path: Path, fernet: Fernet) -> None:
+    """Encrypt a file in streaming fashion and write to target_output_path.
+
+    Format:
+    - 5-byte magic: _CHUNKED_MAGIC
+    - Repeated records: 8-byte big-endian token length, followed by token bytes
+    """
+    dirpath = target_output_path.parent
+    dirpath.mkdir(parents=True, exist_ok=True)
+
+    # write to a temp file in same directory then atomically rename
+    with tempfile.NamedTemporaryFile(dir=str(dirpath), delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp.write(_CHUNKED_MAGIC)
+
+        with source_path.open("rb") as src:
+            while True:
+                chunk = src.read(_STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                token = fernet.encrypt(chunk)
+                tmp.write(struct.pack(">Q", len(token)))
+                tmp.write(token)
+
+    # final move
+    tmp_path.replace(target_output_path)
+
+
+def _stream_decrypt_file(source_path: Path, target_output_path: Path, fernet: Fernet) -> None:
+    """Decrypt a file written in the streaming chunked Fernet format."""
+    dirpath = target_output_path.parent
+    dirpath.mkdir(parents=True, exist_ok=True)
+
+    with source_path.open("rb") as src:
+        magic = src.read(len(_CHUNKED_MAGIC))
+        if magic != _CHUNKED_MAGIC:
+            # Not chunked format; fall back to attempting a single-token decrypt
+            # to preserve compatibility with non-streamed files.
+            src.seek(0)
+            data = src.read()
+            plaintext = fernet.decrypt(data)
+            # write to temp then move
+            with tempfile.NamedTemporaryFile(dir=str(dirpath), delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(plaintext)
+            tmp_path.replace(target_output_path)
+            return
+
+        # Chunked format: read length-prefixed tokens
+        with tempfile.NamedTemporaryFile(dir=str(dirpath), delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            while True:
+                len_bytes = src.read(8)
+                if not len_bytes:
+                    break
+                if len(len_bytes) != 8:
+                    raise ValueError("Corrupt encrypted file: unexpected length header")
+                (token_len,) = struct.unpack(">Q", len_bytes)
+                token = src.read(token_len)
+                if len(token) != token_len:
+                    raise ValueError("Corrupt encrypted file: token truncated")
+                plaintext = fernet.decrypt(token)
+                tmp.write(plaintext)
+
+    tmp_path.replace(target_output_path)
+
+
 def _encrypted_file_name(source_name: str, fernet: Fernet) -> str:
     """Encrypt a file name using the provided Fernet instance."""
     return fernet.encrypt(source_name.encode("utf-8")).decode("ascii")
@@ -525,28 +601,30 @@ def _cipher_worker(
             else:
                 raise ValueError("Missing output file path for non-filename transformation")
 
+            # Stream the file to avoid high memory usage on large files.
             if operation == "encrypt":
-                transformed_bytes = fernet.encrypt(source_path.read_bytes())
+                # Ensure destination safety when not overwriting source.
+                if not overwrite_source_file and target_output_path.exists():
+                    raise ValueError("Requested output path already exists")
+                _stream_encrypt_file(source_path, target_output_path, fernet)
             elif operation == "decrypt":
-                transformed_bytes = fernet.decrypt(source_path.read_bytes())
+                if not overwrite_source_file and target_output_path.exists():
+                    raise ValueError("Requested output path already exists")
+                _stream_decrypt_file(source_path, target_output_path, fernet)
             else:
                 raise ValueError(f"Unsupported operation: {operation}")
 
+            # If overwrite was requested and the target path differs from the
+            # source, remove the original source to mimic previous rename behavior.
             if overwrite_source_file:
-                source_path.write_bytes(transformed_bytes)
-
                 if target_output_path.resolve(strict=False) != source_path.resolve(strict=False):
-                    if target_output_path.exists():
-                        raise ValueError("Requested output path already exists")
-                    source_path.rename(target_output_path)
-                    output_path = target_output_path
-                else:
-                    output_path = source_path
-            else:
-                if target_output_path.exists():
-                    raise ValueError("Requested output path already exists")
-                target_output_path.write_bytes(transformed_bytes)
-                output_path = target_output_path
+                    try:
+                        source_path.unlink()
+                    except Exception:
+                        # If unlink fails, leave files as-is; the result file exists.
+                        pass
+
+            output_path = target_output_path
 
             if transform_file_name:
                 processed_files.append(
