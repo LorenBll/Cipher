@@ -5,6 +5,8 @@ Cipher is a local file encryption and decryption service. It solves the problem 
 ## About
 Cipher is scoped to local file operations and keeps task state in memory while background workers process queued jobs. The service binds to `127.0.0.1` on port `49160`, so it is intended for local-only use on the machine where it is running.
 
+Cipher also supports processing very large files without loading them fully into memory. When encrypting or decrypting large files the service streams data in 1 MiB chunks and writes a chunked Fernet format to disk. This chunked layout begins with a small magic header (`FRTN1`) followed by a sequence of length-prefixed Fernet tokens; the server will still decrypt legacy single-token files produced by older versions.
+
 ## Setup
 1. Install the Python dependencies with `pip install -r requirements.txt`.
 2. Review `resources/configuration.json` to configure `port`, `allowed_roots`, and `blacklisted_roots`.
