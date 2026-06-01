@@ -17,6 +17,11 @@ from cryptography.fernet import Fernet, InvalidToken
 import struct
 import tempfile
 from flask import Flask, jsonify, request
+import traceback
+import shutil
+import uuid
+import errno
+import time as _time
 
 logger = logging.getLogger(__name__)
 
@@ -437,8 +442,8 @@ def _stream_encrypt_file(source_path: Path, target_output_path: Path, fernet: Fe
                 tmp.write(struct.pack(">Q", len(token)))
                 tmp.write(token)
 
-    # final move
-    tmp_path.replace(target_output_path)
+    # final move with retries to handle Windows locks (OneDrive etc.).
+    _replace_with_retries(tmp_path, target_output_path)
 
 
 def _stream_decrypt_file(source_path: Path, target_output_path: Path, fernet: Fernet) -> None:
@@ -477,7 +482,83 @@ def _stream_decrypt_file(source_path: Path, target_output_path: Path, fernet: Fe
                 plaintext = fernet.decrypt(token)
                 tmp.write(plaintext)
 
-    tmp_path.replace(target_output_path)
+    _replace_with_retries(tmp_path, target_output_path)
+
+
+def _replace_with_retries(src: Path, dest: Path, attempts: int = 5, delay: float = 0.2) -> None:
+    """Attempt to atomically replace dest with src, retrying on access errors.
+
+    This helps on Windows where antivirus/OneDrive can transiently lock files.
+    """
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            # Use os.replace via Path.replace which should be atomic where supported.
+            src.replace(dest)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+        except OSError as exc:
+            # Map common access denied errno
+            if getattr(exc, "winerror", None) == 5 or exc.errno in {errno.EACCES, errno.EPERM}:
+                last_exc = exc
+            else:
+                raise
+
+        # Try os.replace as an alternative
+        try:
+            import os
+
+            os.replace(str(src), str(dest))
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        # As another fallback, try copying the file contents then removing the temp
+        try:
+            shutil.copyfile(str(src), str(dest))
+            src.unlink(missing_ok=True)
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        _time.sleep(delay)
+
+    # If we reach here, all attempts failed; raise the last seen exception
+    if last_exc:
+        raise last_exc
+
+
+def _safe_rename_with_retries(src: Path, dest: Path, attempts: int = 5, delay: float = 0.2) -> None:
+    """Attempt to rename/move src to dest, with retries and copy fallback on Windows locks."""
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            src.replace(dest)
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        try:
+            import os
+
+            os.replace(str(src), str(dest))
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        # Fallback: copy contents then remove source
+        try:
+            shutil.copyfile(str(src), str(dest))
+            src.unlink(missing_ok=True)
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        _time.sleep(delay)
+
+    if last_exc:
+        raise last_exc
 
 
 def _encrypted_file_name(source_name: str, fernet: Fernet) -> str:
@@ -601,30 +682,37 @@ def _cipher_worker(
             else:
                 raise ValueError("Missing output file path for non-filename transformation")
 
-            # Stream the file to avoid high memory usage on large files.
-            if operation == "encrypt":
-                # Ensure destination safety when not overwriting source.
-                if not overwrite_source_file and target_output_path.exists():
-                    raise ValueError("Requested output path already exists")
-                _stream_encrypt_file(source_path, target_output_path, fernet)
-            elif operation == "decrypt":
-                if not overwrite_source_file and target_output_path.exists():
-                    raise ValueError("Requested output path already exists")
-                _stream_decrypt_file(source_path, target_output_path, fernet)
-            else:
-                raise ValueError(f"Unsupported operation: {operation}")
-
-            # If overwrite was requested and the target path differs from the
-            # source, remove the original source to mimic previous rename behavior.
             if overwrite_source_file:
-                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False):
-                    try:
-                        source_path.unlink()
-                    except Exception:
-                        # If unlink fails, leave files as-is; the result file exists.
-                        pass
+                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False) and target_output_path.exists():
+                    raise ValueError("Requested output path already exists")
 
-            output_path = target_output_path
+                # Overwrite mode writes back to the source file first, then
+                # optionally renames that updated source to the requested output.
+                if operation == "encrypt":
+                    _stream_encrypt_file(source_path, source_path, fernet)
+                elif operation == "decrypt":
+                    _stream_decrypt_file(source_path, source_path, fernet)
+                else:
+                    raise ValueError(f"Unsupported operation: {operation}")
+
+                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False):
+                    _safe_rename_with_retries(source_path, target_output_path)
+                    output_path = target_output_path
+                else:
+                    output_path = source_path
+            else:
+                # Stream the file to avoid high memory usage on large files.
+                if target_output_path.exists():
+                    raise ValueError("Requested output path already exists")
+
+                if operation == "encrypt":
+                    _stream_encrypt_file(source_path, target_output_path, fernet)
+                elif operation == "decrypt":
+                    _stream_decrypt_file(source_path, target_output_path, fernet)
+                else:
+                    raise ValueError(f"Unsupported operation: {operation}")
+
+                output_path = target_output_path
 
             if transform_file_name:
                 processed_files.append(
@@ -653,9 +741,17 @@ def _cipher_worker(
         )
     except InvalidToken as exc:
         logger.debug("InvalidToken while processing task %s: %s", task_id, exc)
+        with jobs_lock:
+            jobs[task_id]["error_detail"] = str(exc)
         _finalize_task_failure(task_id, "Invalid Fernet key or encrypted file")
     except Exception as exc:
-        logger.debug("Unhandled exception in _cipher_worker for task %s: %s", task_id, exc, exc_info=True)
+        tb = traceback.format_exc()
+        logger.debug(
+            "Unhandled exception in _cipher_worker for task %s: %s", task_id, exc, exc_info=True
+        )
+        with jobs_lock:
+            jobs[task_id]["error_detail"] = str(exc)
+            jobs[task_id]["traceback"] = tb
         _finalize_task_failure(task_id, "An internal error occurred while processing the task")
 
 
@@ -851,6 +947,11 @@ def task_status(task_id: str) -> tuple[Any, int]:
 
     if task["status"] == "failed":
         response_body["error"] = task.get("error", "Unknown error")
+        # Provide a short error detail for debugging local failures.
+        if "error_detail" in task:
+            response_body["error_detail"] = task.get("error_detail")
+        # Return 500 for failed tasks so HTTP clients can detect failures.
+        return jsonify(response_body), 500
 
     return jsonify(response_body), 200
 

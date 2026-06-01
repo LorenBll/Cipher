@@ -109,7 +109,25 @@ Returns current task state and final result/error once finished.
 - Path parameters:
 	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
 - Returns:
-	- `200` ->
+	- `200` -> (for `queued`, `in_progress`, or `completed`)
+		```json
+		{
+			"task_id": "<uuid>",
+			"operation": "encrypt",
+			"status": "queued|in_progress|completed",
+			"result": { ... }
+		}
+		```
+	- `500` -> (for `failed` tasks)
+		```json
+		{
+			"task_id": "<uuid>",
+			"operation": "encrypt",
+			"status": "failed",
+			"error": "<failure-reason>",
+			"error_detail": "<short exception message>"
+		}
+		```
 		```json
 		{
 			"task_id": "<uuid>",
@@ -125,8 +143,17 @@ Returns current task state and final result/error once finished.
 			"error": "<failure-reason>"
 		}
 		```
-		Notes: `result` is present only for completed tasks; `error` only for failed tasks. When `encrypt_file_name` or `decrypt_file_name` is `true`, each file entry uses `input_path` and `output_path` with absolute paths instead of the name-only fields.
-		When filename transformation is disabled, each file entry still returns `input_name` and `output_name`; `output_name` matches the requested output file name or the final renamed file when `overwrite_file` is used.
+				Notes:
+				- `result` is present only for completed tasks; `error` (and `error_detail`) only for failed tasks.
+				- When `encrypt_file_name` or `decrypt_file_name` is `true`, each file entry uses `input_path` and `output_path` with absolute paths instead of the name-only fields.
+				- When filename transformation is disabled, each file entry returns `input_name` and `output_name`; `output_name` matches the requested output file name or the final renamed file when `overwrite_file` is used.
+				- The `error_detail` field contains a short exception message intended to help debug local failures (for example, permission denied caused by file syncing software). It may contain non-sensitive filesystem info.
+
+				Troubleshooting permission errors:
+				- On Windows, background sync services (OneDrive) or antivirus can temporarily lock files and cause `Permission denied` when the server attempts to replace or rename files. If you see permission errors in `error_detail`:
+					- Pause OneDrive or move the file to a non-synced folder and retry.
+					- Alternatively, provide an explicit `output_file_path` instead of `overwrite_file`, or run the command against a copy of the file.
+				- The server will retry atomic replaces and falls back to copy-based moves, but transient locks can still cause failures.
 	- `404` -> `{ "error": "Task not found." }`
 
 ### `GET /api/health`
