@@ -3,7 +3,7 @@
 Cipher is a local file encryption and decryption service. It solves the problem of safely creating Fernet keys and processing file encryption or decryption jobs through a small HTTP API.
 
 ## About
-Cipher is scoped to local file operations and keeps task state in memory while background workers process queued jobs. The service binds to `127.0.0.1` on port `49160`, so it is intended for local-only use on the machine where it is running.
+Cipher is scoped to local file operations and keeps task state in memory while background workers process queued jobs. The service binds to `127.0.0.1` on port `49158`, so it is intended for local-only use on the machine where it is running.
 
 Cipher also supports processing very large files without loading them fully into memory. When encrypting or decrypting large files the service streams data in 1 MiB chunks and writes a chunked Fernet format to disk. This chunked layout begins with a small magic header (`FRTN1`) followed by a sequence of length-prefixed Fernet tokens; the server will still decrypt legacy single-token files produced by older versions.
 
@@ -20,7 +20,7 @@ Cipher also supports processing very large files without loading them fully into
 		Example `resources/configuration.json`:
 		```json
 		{
-			"port": 49160,
+			"port": 49158,
 			"allowed_roots": [],
 			"blacklisted_roots": []
 		}
@@ -167,7 +167,7 @@ Service and queue health snapshot.
 			"status": "ok",
 			"service": "Cipher",
 			"bind_address": "127.0.0.1",
-			"port": 49160,
+			"port": 49158,
 			"task_counts": {
 				"queued": 0,
 				"in_progress": 0,

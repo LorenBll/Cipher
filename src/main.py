@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "configuration.json"
 SERVICE_BIND_ADDRESS = "127.0.0.1"
-DEFAULT_SERVICE_PORT = 49160
+DEFAULT_SERVICE_PORT = 49158
 SERVICE_PORT: int | None = None
 ALLOWED_ROOTS: list[Path] = []
 BLACKLISTED_ROOTS: list[Path] = []
