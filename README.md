@@ -34,7 +34,9 @@ Cipher also supports processing very large files without loading them fully into
 
 ## API Endpoints
 
-### `POST /api/key`
+All endpoints also support `OPTIONS`; `GET` endpoints additionally support `HEAD`.
+
+### `POST /api/key` (also `OPTIONS`)
 Creates a new Fernet key file.
 
 - Body (JSON object):
@@ -46,7 +48,7 @@ Creates a new Fernet key file.
  	- `400` -> `{ "error": "<validation-message>" }`
  	- `500` -> `{ "error": "Failed to create key file" }`
 
-### `POST /api/encrypt`
+### `POST /api/encrypt` (also `OPTIONS`)
 Queues one encryption task executed in a background thread.
 
 - Body (JSON object):
@@ -73,7 +75,7 @@ Queues one encryption task executed in a background thread.
 	- `400` -> `{ "error": "<validation-message>" }`
 	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
 
-### `POST /api/decrypt`
+### `POST /api/decrypt` (also `OPTIONS`)
 Queues one decryption task executed in a background thread.
 
 - Body (JSON object):
@@ -103,7 +105,7 @@ Queues one decryption task executed in a background thread.
 	- `400` -> `{ "error": "<validation-message>" }`
 	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
 
-### `GET /api/task/<task_id>`
+### `GET /api/task/<task_id>` (also `HEAD`, `OPTIONS`)
 Returns current task state and final result/error once finished.
 
 - Path parameters:
@@ -156,7 +158,7 @@ Returns current task state and final result/error once finished.
 				- The server will retry atomic replaces and falls back to copy-based moves, but transient locks can still cause failures.
 	- `404` -> `{ "error": "Task not found." }`
 
-### `GET /api/health`
+### `GET /api/health` (also `HEAD`, `OPTIONS`)
 Service and queue health snapshot.
 
 - Body: none
