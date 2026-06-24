@@ -46,6 +46,22 @@ except (TypeError, ValueError):
 
 app = Flask(__name__)
 
+
+def _options_response(allowed_methods: list[str]) -> tuple:
+    """Return an OPTIONS response with allowed methods."""
+    response = jsonify({})
+    response.headers["Allow"] = ", ".join(allowed_methods)
+    response.headers["Access-Control-Allow-Methods"] = ", ".join(allowed_methods)
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response, 200
+
+
+def _head_response() -> tuple:
+    """Return a HEAD response with no body."""
+    response = jsonify({})
+    return response, 200
+
+
 jobs_lock = Lock()
 jobs: dict[str, dict[str, Any]] = {}
 
@@ -874,9 +890,12 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
     return jsonify(response_body), 202
 
 
-@app.post("/api/key")
+@app.route("/api/key", methods=["POST", "OPTIONS"])
 def create_key() -> tuple[Any, int]:
     """Create a Fernet key file on disk."""
+    if request.method == "OPTIONS":
+        return _options_response(["POST", "OPTIONS"])
+
     _ensure_cleanup_thread_started()
 
     payload = request.get_json(silent=True)
@@ -913,21 +932,30 @@ def create_key() -> tuple[Any, int]:
     )
 
 
-@app.post("/api/encrypt")
+@app.route("/api/encrypt", methods=["POST", "OPTIONS"])
 def encrypt() -> tuple[Any, int]:
     """Queue a file encryption task."""
+    if request.method == "OPTIONS":
+        return _options_response(["POST", "OPTIONS"])
     return _queue_cipher_task("encrypt")
 
 
-@app.post("/api/decrypt")
+@app.route("/api/decrypt", methods=["POST", "OPTIONS"])
 def decrypt() -> tuple[Any, int]:
     """Queue a file decryption task."""
+    if request.method == "OPTIONS":
+        return _options_response(["POST", "OPTIONS"])
     return _queue_cipher_task("decrypt")
 
 
-@app.get("/api/task/<task_id>")
+@app.route("/api/task/<task_id>", methods=["GET", "HEAD", "OPTIONS"])
 def task_status(task_id: str) -> tuple[Any, int]:
     """Get the current status of a queued cipher task."""
+    if request.method == "OPTIONS":
+        return _options_response(["GET", "HEAD", "OPTIONS"])
+    if request.method == "HEAD":
+        return _head_response()
+
     _ensure_cleanup_thread_started()
 
     with jobs_lock:
@@ -956,9 +984,14 @@ def task_status(task_id: str) -> tuple[Any, int]:
     return jsonify(response_body), 200
 
 
-@app.get("/api/health")
+@app.route("/api/health", methods=["GET", "HEAD", "OPTIONS"])
 def api_health() -> tuple[Any, int]:
     """Report service health and task statistics."""
+    if request.method == "OPTIONS":
+        return _options_response(["GET", "HEAD", "OPTIONS"])
+    if request.method == "HEAD":
+        return _head_response()
+
     _ensure_cleanup_thread_started()
 
     with jobs_lock:
