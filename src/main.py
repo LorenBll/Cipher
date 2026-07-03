@@ -890,11 +890,13 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
     return jsonify(response_body), 202
 
 
-@app.route("/api/key", methods=["POST", "OPTIONS"])
+@app.route("/api/key", methods=["POST", "HEAD", "OPTIONS"])
 def create_key() -> tuple[Any, int]:
     """Create a Fernet key file on disk."""
     if request.method == "OPTIONS":
-        return _options_response(["POST", "OPTIONS"])
+        return _options_response(["POST", "HEAD", "OPTIONS"])
+    if request.method == "HEAD":
+        return _head_response()
 
     _ensure_cleanup_thread_started()
 
@@ -932,19 +934,23 @@ def create_key() -> tuple[Any, int]:
     )
 
 
-@app.route("/api/encrypt", methods=["POST", "OPTIONS"])
+@app.route("/api/encrypt", methods=["POST", "HEAD", "OPTIONS"])
 def encrypt() -> tuple[Any, int]:
     """Queue a file encryption task."""
     if request.method == "OPTIONS":
-        return _options_response(["POST", "OPTIONS"])
+        return _options_response(["POST", "HEAD", "OPTIONS"])
+    if request.method == "HEAD":
+        return _head_response()
     return _queue_cipher_task("encrypt")
 
 
-@app.route("/api/decrypt", methods=["POST", "OPTIONS"])
+@app.route("/api/decrypt", methods=["POST", "HEAD", "OPTIONS"])
 def decrypt() -> tuple[Any, int]:
     """Queue a file decryption task."""
     if request.method == "OPTIONS":
-        return _options_response(["POST", "OPTIONS"])
+        return _options_response(["POST", "HEAD", "OPTIONS"])
+    if request.method == "HEAD":
+        return _head_response()
     return _queue_cipher_task("decrypt")
 
 

@@ -34,9 +34,9 @@ Cipher also supports processing very large files without loading them fully into
 
 ## API Endpoints
 
-All endpoints also support `OPTIONS`; `GET` endpoints additionally support `HEAD`.
+All endpoints also support `HEAD` and `OPTIONS`.
 
-### `POST /api/key` (also `OPTIONS`)
+### `POST /api/key` (also `HEAD`, `OPTIONS`)
 Creates a new Fernet key file.
 
 - Body (JSON object):
@@ -48,7 +48,7 @@ Creates a new Fernet key file.
  	- `400` -> `{ "error": "<validation-message>" }`
  	- `500` -> `{ "error": "Failed to create key file" }`
 
-### `POST /api/encrypt` (also `OPTIONS`)
+### `POST /api/encrypt` (also `HEAD`, `OPTIONS`)
 Queues one encryption task executed in a background thread.
 
 - Body (JSON object):
@@ -75,7 +75,7 @@ Queues one encryption task executed in a background thread.
 	- `400` -> `{ "error": "<validation-message>" }`
 	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
 
-### `POST /api/decrypt` (also `OPTIONS`)
+### `POST /api/decrypt` (also `HEAD`, `OPTIONS`)
 Queues one decryption task executed in a background thread.
 
 - Body (JSON object):
