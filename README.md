@@ -12,7 +12,7 @@ Cipher also supports processing very large files without loading them fully into
 This service can optionally register with [PortHandler](https://www.github.com/LorenBll/PortHandler) for service discovery, but does not depend on it. Set `porthandlerEnabled` in `resources/configuration.json` to control this behavior.
 
 ## Setup
-1. Install the Python dependencies with `pip install -r requirements.txt`.
+1. `pip install -r requirements.txt`
 2. Review `resources/configuration.json` to configure `port`, `allowed_roots`, and `blacklisted_roots`.
 		- `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
 		- `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If `allowed_roots` is empty and `blacklisted_roots` is non-empty, any path inside a blacklisted root is forbidden.
@@ -40,11 +40,10 @@ This service can optionally register with [PortHandler](https://www.github.com/L
 
 All `/api/*` endpoints are local-device only. Requests from non-local addresses are rejected with:
 - `403` -> `{ "error": "Local device access only." }`
+- All endpoints also support `HEAD` and `OPTIONS`.
+- API responses use `Connection: close` (non-persistent connections).
 
 ## API Endpoints
-
-All endpoints also support `HEAD` and `OPTIONS`.
-- API responses use `Connection: close` (non-persistent connections).
 
 ### `POST /api/key` (also `HEAD`, `OPTIONS`)
 Creates a new Fernet key file.
@@ -98,8 +97,6 @@ Queues one decryption task executed in a background thread.
 	- `output_file_paths` (array of strings, optional alias): one absolute output file path per input file.
 	- Requirement rule: when `decrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
 	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
-	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
-	- Note: the file referenced by `key_path` must not be included in the `file_path`/`file_paths` input or in `output_file_path`/`output_file_paths`. The server will reject requests that attempt to process the key file itself.
 	- Note: the file referenced by `key_path` must not be included in the `file_path`/`file_paths` input or in `output_file_path`/`output_file_paths`. The server will reject requests that attempt to process the key file itself.
 - Returns:
 	- `202` ->
