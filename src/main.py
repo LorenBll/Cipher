@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -45,6 +46,80 @@ except (TypeError, ValueError):
     TASK_CLEANUP_INTERVAL_SECONDS = 60
 
 app = Flask(__name__)
+
+
+def _get_local_device_addresses() -> set[str]:
+    local_addresses: set[str] = set()
+    candidate_names = {socket.gethostname(), socket.getfqdn()}
+
+    for candidate_name in candidate_names:
+        if not candidate_name:
+            continue
+
+        try:
+            local_addresses.update(
+                address_info[4][0]
+                for address_info in socket.getaddrinfo(candidate_name, None)
+            )
+        except OSError:
+            pass
+
+        try:
+            local_addresses.update(socket.gethostbyname_ex(candidate_name)[2])
+        except OSError:
+            pass
+
+    for probe_address in ("8.8.8.8", "1.1.1.1"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as socket_handle:
+                socket_handle.connect((probe_address, 80))
+                local_addresses.add(socket_handle.getsockname()[0])
+        except OSError:
+            pass
+
+    normalized_addresses: set[str] = set()
+    for address_value in local_addresses:
+        try:
+            normalized_addresses.add(ipaddress.ip_address(address_value).compressed)
+        except ValueError:
+            continue
+
+    normalized_addresses.update({"127.0.0.1", "::1"})
+    return normalized_addresses
+
+
+def _is_local_request() -> bool:
+    remote_address = request.remote_addr
+    if not isinstance(remote_address, str) or not remote_address.strip():
+        return False
+
+    try:
+        client_ip = ipaddress.ip_address(remote_address.strip())
+    except ValueError:
+        return False
+
+    if client_ip.is_loopback:
+        return True
+
+    return client_ip.compressed in _get_local_device_addresses()
+
+
+@app.before_request
+def restrict_to_local_device() -> tuple | None:
+    if request.path.startswith("/api/") and not _is_local_request():
+        return _error_response("Local device access only.", 403)
+
+    return None
+
+
+@app.after_request
+def set_connection_header(response):
+    content_type = response.headers.get("Content-Type", "")
+    if content_type.startswith("text/html"):
+        response.headers["Connection"] = "keep-alive"
+    else:
+        response.headers["Connection"] = "close"
+    return response
 
 
 def _options_response(allowed_methods: list[str]) -> tuple:

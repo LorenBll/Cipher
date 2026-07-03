@@ -32,9 +32,15 @@ Cipher also supports processing very large files without loading them fully into
 2. Unix-like systems: run `bash scripts/run.sh`.
 3. Manual: run `python src/main.py` from the project root.
 
+## Access Control
+
+All `/api/*` endpoints are local-device only. Requests from non-local addresses are rejected with:
+- `403` -> `{ "error": "Local device access only." }`
+
 ## API Endpoints
 
 All endpoints also support `HEAD` and `OPTIONS`.
+- API responses use `Connection: close` (non-persistent connections).
 
 ### `POST /api/key` (also `HEAD`, `OPTIONS`)
 Creates a new Fernet key file.
