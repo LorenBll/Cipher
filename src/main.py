@@ -14,6 +14,9 @@ from threading import Lock, Thread
 from typing import Any
 from uuid import uuid4
 
+import urllib.error
+import urllib.request
+
 from cryptography.fernet import Fernet, InvalidToken
 import struct
 import tempfile
@@ -32,6 +35,8 @@ DEFAULT_SERVICE_PORT = 49158
 SERVICE_PORT: int | None = None
 ALLOWED_ROOTS: list[Path] = []
 BLACKLISTED_ROOTS: list[Path] = []
+
+PORTHANDLER_HASH: str | None = None
 
 try:
     TASK_RETENTION_MINUTES = int(os.getenv("TASK_RETENTION_MINUTES", "30"))
@@ -1110,6 +1115,44 @@ def api_health() -> tuple[Any, int]:
     )
 
 
+def _register_with_porthandler() -> None:
+    global PORTHANDLER_HASH
+    try:
+        config = _load_configuration()
+    except Exception:
+        config = {}
+    ph_port = config.get("porthandlerPort", 49155)
+
+    for attempt in range(3):
+        time.sleep(15)
+        try:
+            payload = json.dumps({
+                "name": "Cipher",
+                "port": SERVICE_PORT,
+                "starting_script": str(Path(__file__).resolve()),
+                "pid": os.getpid(),
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{ph_port}/api/register",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 201:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    PORTHANDLER_HASH = data.get("hash")
+                    logger.info(f"Registered with PortHandler, hash={PORTHANDLER_HASH[:16]}...")
+                    return
+
+        except Exception as exc:
+            logger.warning(f"PortHandler registration attempt {attempt + 1}/3 failed: {exc}")
+
+    logger.warning("PortHandler registration failed after 3 attempts, starting without registration")
+
+
 if __name__ == "__main__":
     try:
         logging.basicConfig(
@@ -1123,6 +1166,15 @@ if __name__ == "__main__":
         exit(1)
 
     _ensure_cleanup_thread_started()
+
+    config = _load_configuration()
+    if config.get("porthandlerEnabled", True):
+        registration_thread = Thread(
+            target=_register_with_porthandler,
+            name="porthandler-registration",
+            daemon=True,
+        )
+        registration_thread.start()
 
     try:
         logger.info("=" * 50)

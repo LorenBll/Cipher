@@ -1,5 +1,7 @@
 {
   "port": 49158,
+  "porthandlerEnabled": true,
+  "porthandlerPort": 49155,
   "allowed_roots": [],
   "blacklisted_roots": []
 }
