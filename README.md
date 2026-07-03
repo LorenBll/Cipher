@@ -180,6 +180,7 @@ Service and queue health snapshot.
 			"service": "Cipher",
 			"bind_address": "127.0.0.1",
 			"port": 49158,
+			"hostname": "...",
 			"task_counts": {
 				"queued": 0,
 				"in_progress": 0,
@@ -189,10 +190,7 @@ Service and queue health snapshot.
 			},
 			"task_retention_minutes": 60,
 			"task_cleanup_interval_seconds": 60,
-			"cipher_algorithm": "fernet",
-			"hostname": "...",
-			"primary_ip": "...",
-			"local_ips": ["..."]
+			"cipher_algorithm": "fernet"
 		}
 		```
 
