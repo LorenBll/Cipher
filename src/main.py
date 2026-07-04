@@ -1127,7 +1127,7 @@ def _register_with_porthandler() -> None:
             payload = json.dumps({
                 "name": "Cipher",
                 "port": SERVICE_PORT,
-                "starting_script": str(Path(__file__).resolve()),
+                "starting_script": str(Path(__file__).resolve().parent.parent / "scripts" / ("run.bat" if os.name == "nt" else "run.sh")),
                 "pid": os.getpid(),
             }).encode("utf-8")
 
