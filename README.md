@@ -12,8 +12,8 @@ Cipher also supports processing very large files without loading them fully into
 This service can optionally register with [PortHandler](https://www.github.com/LorenBll/PortHandler) for service discovery, but does not depend on it. Set `porthandlerEnabled` in `resources/configuration.json` to control this behavior.
 
 ## Setup
-1. `pip install -r requirements.txt`
-2. Review `resources/configuration.json` to configure `port`, `allowed_roots`, and `blacklisted_roots`.
+1. Install dependencies: run `scripts\setup.bat` (Windows) or `bash scripts/setup.sh` (Unix), or manually `pip install -r requirements.txt`.
+2. Review `resources/configuration.json` to configure `port`, `porthandlerEnabled`, `porthandlerPort`, `allowed_roots`, and `blacklisted_roots`.
 		- `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
 		- `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If `allowed_roots` is empty and `blacklisted_roots` is non-empty, any path inside a blacklisted root is forbidden.
 		- Behavior summary:
@@ -25,11 +25,13 @@ This service can optionally register with [PortHandler](https://www.github.com/L
 		```json
 		{
 			"port": 49158,
+			"porthandlerEnabled": true,
+			"porthandlerPort": 49155,
 			"allowed_roots": [],
 			"blacklisted_roots": []
 		}
 		```
-3. Leave the project structure intact so the service can find `resources/` and `src/`.
+	3. Leave the project structure intact so the service can find `resources/` and `src/`.
 
 ## Run
 1. Windows: run `scripts\run.bat`.
@@ -118,13 +120,27 @@ Returns current task state and final result/error once finished.
 - Path parameters:
 	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
 - Returns:
-	- `200` -> (for `queued`, `in_progress`, or `completed`)
+	- `200` -> (for `queued`, `in_progress`)
 		```json
 		{
 			"task_id": "<uuid>",
 			"operation": "encrypt",
-			"status": "queued|in_progress|completed",
-			"result": { ... }
+			"status": "queued|in_progress"
+		}
+		```
+	- `200` -> (for `completed` tasks)
+		```json
+		{
+			"task_id": "<uuid>",
+			"operation": "encrypt",
+			"status": "completed",
+			"result": {
+				"operation": "encrypt",
+				"file_count": 1,
+				"files": [
+					{ "input_name": "...", "output_name": "..." }
+				]
+			}
 		}
 		```
 	- `500` -> (for `failed` tasks)
@@ -135,21 +151,6 @@ Returns current task state and final result/error once finished.
 			"status": "failed",
 			"error": "<failure-reason>",
 			"error_detail": "<short exception message>"
-		}
-		```
-		```json
-		{
-			"task_id": "<uuid>",
-			"operation": "encrypt",
-			"status": "queued|in_progress|completed|failed",
-			"result": {
-				"operation": "encrypt",
-				"file_count": 1,
-				"files": [
-					{ "input_name": "...", "output_name": "..." }
-				]
-			},
-			"error": "<failure-reason>"
 		}
 		```
 				Notes:
@@ -185,11 +186,19 @@ Service and queue health snapshot.
 				"failed": 0,
 				"total": 0
 			},
-			"task_retention_minutes": 60,
+			"task_retention_minutes": 30,
 			"task_cleanup_interval_seconds": 60,
 			"cipher_algorithm": "fernet"
 		}
 		```
+
+## Deployment
+
+The `deployment/` directory contains platform-specific auto-start configurations:
+
+- **macOS**: `deployment/com.service.plist` — launchd plist. Copy to `~/Library/LaunchAgents/` after updating paths.
+- **Linux**: `deployment/service.service` — systemd unit. Copy to `/etc/systemd/system/` after updating the `User` and paths.
+- **Windows**: `deployment/startup-windows.vbs` — startup script. Place in the Windows Startup folder (`shell:startup`) or schedule as a task.
 
 ## License
 - [LICENSE](LICENSE)
