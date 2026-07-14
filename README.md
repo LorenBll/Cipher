@@ -200,6 +200,8 @@ The `deployment/` directory contains platform-specific auto-start configurations
 - **Linux**: `deployment/service.service` — systemd unit. Copy to `/etc/systemd/system/` after updating the `User` and paths.
 - **Windows**: `deployment/startup-windows.vbs` — startup script. Place in the Windows Startup folder (`shell:startup`) or schedule as a task.
 
+---
+
 ## License
 - [LICENSE](LICENSE)
 

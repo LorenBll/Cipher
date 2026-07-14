@@ -2,20 +2,17 @@
 
 ## Supported Versions
 
-We only provide security updates for versions and deployments that are
-currently maintained by the project owner or release process. If this
-repository uses versioned releases, the supported versions should be
-listed here.
+We only provide security updates for versions and deployments that are currently maintained by the project owner or release process. If this repository uses versioned releases, the supported versions should be listed here.
 
 | Version | Supported |
 | ------- | --------- |
-| Latest  | Yes       |
+| Latest   | Yes       |
 
 ## Reporting a Vulnerability
 
-If you believe you have found a security issue, please report it privately
-to the project maintainers rather than opening a public issue. Include as
-much detail as possible, such as:
+If you believe you have found a security issue, please report it privately to the project maintainers rather than opening a public issue.
+
+Include as much detail as possible, such as:
 
 - A clear description of the issue
 - The affected component or feature
@@ -23,8 +20,7 @@ much detail as possible, such as:
 - Any relevant logs, screenshots, or proof of concept code
 - The potential impact and how severe you believe it is
 
-If the report involves credentials, API keys, tokens, or other secrets,
-do not post them publicly. Redact sensitive values before sharing.
+If the report involves credentials, API keys, tokens, or other secrets, do not post them publicly. Redact sensitive values before sharing.
 
 ## What To Expect
 
@@ -47,6 +43,4 @@ This project is intended to follow basic security hygiene:
 
 ## Disclosure Notes
 
-Do not publicly disclose an unpatched vulnerability until maintainers have had
-reasonable time to investigate and respond. If a coordinated disclosure timeline
-is needed, it can be discussed during the report process.
+Do not publicly disclose an unpatched vulnerability until maintainers have had reasonable time to investigate and respond. If a coordinated disclosure timeline is needed, it can be discussed during the report process.

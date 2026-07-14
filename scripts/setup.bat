@@ -118,3 +118,8 @@ echo Next: scripts\run.bat
 echo.
 echo For auto-start on Windows:
 echo   1. Edit deployment\startup-windows.vbs (update paths)
+echo   2. Win+R, type: shell:startup
+echo   3. Copy startup-windows.vbs to the Startup folder
+echo.
+pause
+endlocal
