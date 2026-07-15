@@ -9,11 +9,11 @@ Cipher also supports processing very large files without loading them fully into
 
 ## Integration
 
-This service can optionally register with [ServiceHandler](https://www.github.com/LorenBll/ServiceHandler) for service discovery, but does not depend on it. Set `porthandlerEnabled` in `resources/configuration.json` to control this behavior.
+This service can optionally register with [ServiceHandler](https://www.github.com/LorenBll/ServiceHandler) for service discovery, but does not depend on it. Set `servicehandlerEnabled` in `resources/configuration.json` to control this behavior.
 
 ## Setup
 1. Install dependencies: run `scripts\setup.bat` (Windows) or `bash scripts/setup.sh` (Unix), or manually `pip install -r requirements.txt`.
-2. Review `resources/configuration.json` to configure `port`, `porthandlerEnabled`, `porthandlerPort`, `allowed_roots`, and `blacklisted_roots`.
+2. Review `resources/configuration.json` to configure `port`, `servicehandlerEnabled`, `servicehandlerPort`, `allowed_roots`, and `blacklisted_roots`.
 		- `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
 		- `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If `allowed_roots` is empty and `blacklisted_roots` is non-empty, any path inside a blacklisted root is forbidden.
 		- Behavior summary:
@@ -25,8 +25,8 @@ This service can optionally register with [ServiceHandler](https://www.github.co
 		```json
 		{
 			"port": 49158,
-			"porthandlerEnabled": true,
-			"porthandlerPort": 49155,
+			"servicehandlerEnabled": true,
+			"servicehandlerPort": 49155,
 			"allowed_roots": [],
 			"blacklisted_roots": []
 		}

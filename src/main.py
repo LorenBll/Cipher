@@ -1119,7 +1119,7 @@ def _servicehandler_keepalive_forever() -> None:
         config = _load_configuration()
     except Exception:
         config = {}
-    ph_port = config.get("porthandlerPort", 49155)
+    ph_port = config.get("servicehandlerPort", 49155)
     service_name = "Cipher"
 
     while True:
@@ -1183,7 +1183,7 @@ if __name__ == "__main__":
     _ensure_cleanup_thread_started()
 
     config = _load_configuration()
-    if config.get("porthandlerEnabled", True):
+    if config.get("servicehandlerEnabled", True):
         servicehandler_thread = Thread(
             target=_servicehandler_keepalive_forever,
             name="servicehandler-keepalive",
