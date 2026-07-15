@@ -202,6 +202,9 @@ The `deployment/` directory contains platform-specific auto-start configurations
 
 ---
 
+## Support
+- Open an issue on [GitHub](https://github.com/LorenBll/Cipher/issues) for bug reports, feature requests, or help.
+
 ## License
 - [LICENSE](LICENSE)
 
