@@ -9,7 +9,7 @@ Cipher also supports processing very large files without loading them fully into
 
 ## Integration
 
-This service can optionally register with [PortHandler](https://www.github.com/LorenBll/PortHandler) for service discovery, but does not depend on it. Set `porthandlerEnabled` in `resources/configuration.json` to control this behavior.
+This service can optionally register with [ServiceHandler](https://www.github.com/LorenBll/ServiceHandler) for service discovery, but does not depend on it. Set `porthandlerEnabled` in `resources/configuration.json` to control this behavior.
 
 ## Setup
 1. Install dependencies: run `scripts\setup.bat` (Windows) or `bash scripts/setup.sh` (Unix), or manually `pip install -r requirements.txt`.

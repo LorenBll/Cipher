@@ -36,7 +36,7 @@ SERVICE_PORT: int | None = None
 ALLOWED_ROOTS: list[Path] = []
 BLACKLISTED_ROOTS: list[Path] = []
 
-PORTHANDLER_HASH: str | None = None
+SERVICEHANDLER_HASH: str | None = None
 
 try:
     TASK_RETENTION_MINUTES = int(os.getenv("TASK_RETENTION_MINUTES", "30"))
@@ -1113,8 +1113,8 @@ def api_health() -> tuple[Any, int]:
     )
 
 
-def _porthandler_keepalive_forever() -> None:
-    global PORTHANDLER_HASH
+def _servicehandler_keepalive_forever() -> None:
+    global SERVICEHANDLER_HASH
     try:
         config = _load_configuration()
     except Exception:
@@ -1136,10 +1136,10 @@ def _porthandler_keepalive_forever() -> None:
                     continue
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
-                logger.warning(f"PortHandler question failed (HTTP {exc.code})")
+                logger.warning(f"ServiceHandler question failed (HTTP {exc.code})")
                 continue
         except Exception as exc:
-            logger.warning(f"PortHandler question failed: {exc}")
+            logger.warning(f"ServiceHandler question failed: {exc}")
             continue
 
         try:
@@ -1148,6 +1148,8 @@ def _porthandler_keepalive_forever() -> None:
                 "port": SERVICE_PORT,
                 "starting_script": str(Path(__file__).resolve().parent.parent / "scripts" / ("run.bat" if os.name == "nt" else "run.sh")),
                 "pid": os.getpid(),
+                "bind_address": SERVICE_BIND_ADDRESS,
+                "hostname": socket.gethostname(),
             }).encode("utf-8")
 
             req = urllib.request.Request(
@@ -1160,10 +1162,10 @@ def _porthandler_keepalive_forever() -> None:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status == 201:
                     data = json.loads(resp.read().decode("utf-8"))
-                    PORTHANDLER_HASH = data.get("hash")
-                    logger.info(f"Registered with PortHandler, hash={PORTHANDLER_HASH[:16]}...")
+                    SERVICEHANDLER_HASH = data.get("hash")
+                    logger.info(f"Registered with ServiceHandler, hash={SERVICEHANDLER_HASH[:16]}...")
         except Exception as exc:
-            logger.warning(f"PortHandler registration attempt failed: {exc}")
+            logger.warning(f"ServiceHandler registration attempt failed: {exc}")
 
 
 if __name__ == "__main__":
@@ -1182,12 +1184,12 @@ if __name__ == "__main__":
 
     config = _load_configuration()
     if config.get("porthandlerEnabled", True):
-        porthandler_thread = Thread(
-            target=_porthandler_keepalive_forever,
-            name="porthandler-keepalive",
+        servicehandler_thread = Thread(
+            target=_servicehandler_keepalive_forever,
+            name="servicehandler-keepalive",
             daemon=True,
         )
-        porthandler_thread.start()
+        servicehandler_thread.start()
 
     try:
         logger.info("=" * 50)
