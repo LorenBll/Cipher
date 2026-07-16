@@ -1126,7 +1126,7 @@ def _servicehandler_keepalive_forever() -> None:
         time.sleep(15)
         try:
             req = urllib.request.Request(
-                f"http://127.0.0.1:{ph_port}/api/question",
+                f"http://127.0.0.1:{ph_port}/api/question/service",
                 data=json.dumps({"name": service_name}).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -1153,7 +1153,7 @@ def _servicehandler_keepalive_forever() -> None:
             }).encode("utf-8")
 
             req = urllib.request.Request(
-                f"http://127.0.0.1:{ph_port}/api/register",
+                f"http://127.0.0.1:{ph_port}/api/register/service",
                 data=payload,
                 headers={"Content-Type": "application/json"},
                 method="POST",
