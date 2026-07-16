@@ -43,13 +43,13 @@ This service can optionally register with [ServiceHandler](https://www.github.co
 All `/api/*` endpoints are local-device only. Requests from non-local addresses are rejected with:
 - `403` -> `{ "error": "Local device access only." }`
 - All endpoints also support `HEAD` and `OPTIONS`.
-- API responses use `Connection: close` (non-persistent connections).
+- API responses use `Connection: close`.
 
 ## API Endpoints
 
 ### `POST /api/key` (also `HEAD`, `OPTIONS`)
 Creates a new Fernet key file.
-
+- Auth: local-device only (no API key required)
 - Body (JSON object):
   	- `directory_path` (string, optional): absolute path to an existing directory where the key file should be created. If omitted, defaults to the repository root. The chosen directory must be permitted by the server policy (`allowed_roots` / `blacklisted_roots`).
  	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
@@ -61,7 +61,7 @@ Creates a new Fernet key file.
 
 ### `POST /api/encrypt` (also `HEAD`, `OPTIONS`)
 Queues one encryption task executed in a background thread.
-
+- Auth: local-device only (no API key required)
 - Body (JSON object):
 	- `key_path` (string, required): absolute path to existing key file.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to encrypt.
@@ -88,7 +88,7 @@ Queues one encryption task executed in a background thread.
 
 ### `POST /api/decrypt` (also `HEAD`, `OPTIONS`)
 Queues one decryption task executed in a background thread.
-
+- Auth: local-device only (no API key required)
 - Body (JSON object):
 	- `key_path` (string, required): absolute path to existing key file.
 	- `file_path` (string or array of strings, required unless `file_paths` used): absolute path(s) of existing file(s) to decrypt.
@@ -116,7 +116,7 @@ Queues one decryption task executed in a background thread.
 
 ### `GET /api/task/<task_id>` (also `HEAD`, `OPTIONS`)
 Returns current task state and final result/error once finished.
-
+- Auth: local-device only (no API key required)
 - Path parameters:
 	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
 - Returns:
@@ -168,7 +168,7 @@ Returns current task state and final result/error once finished.
 
 ### `GET /api/health` (also `HEAD`, `OPTIONS`)
 Service and queue health snapshot.
-
+- Auth: local-device only (no API key required)
 - Body: none
 - Returns:
 	- `200` ->
