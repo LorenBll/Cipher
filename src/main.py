@@ -1245,7 +1245,6 @@ def _servicehandler_keepalive_forever() -> None:
                 "name": service_name,
                 "port": SERVICE_PORT,
                 "starting_script": str(Path(__file__).resolve().parent.parent / "scripts" / ("run.bat" if os.name == "nt" else "run.sh")),
-                "pid": os.getpid(),
                 "bind_address": SERVICE_BIND_ADDRESS,
                 "hostname": socket.gethostname(),
             }).encode("utf-8")
