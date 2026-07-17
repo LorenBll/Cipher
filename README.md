@@ -6,8 +6,6 @@ Cipher is a local file encryption and decryption service. It solves the problem 
 
 Cipher is scoped to local file operations and keeps task state in memory while background workers process queued jobs. The service binds to `127.0.0.1` on port `49158` and rejects API calls that do not come from the local device.
 
-**Features:**
-
 - **Fernet Key Creation** — generate and save a Fernet symmetric key file to any permitted directory.
 - **File Encryption / Decryption** — queue background encryption or decryption tasks for one or more files with a single API call.
 - **Large File Streaming** — files are processed in 1 MiB chunks using a chunked Fernet format (`FRTN1` magic header), avoiding full memory load. Legacy single-token files are still supported on decryption.
@@ -66,8 +64,8 @@ The `deployment/` directory contains platform-specific auto-start configurations
 All `/api/*` endpoints are local-device only. Requests from non-local addresses are rejected with:
 
 - `403` -> `{ "error": "Local device access only." }`
-- All endpoints also support `HEAD` and `OPTIONS`.
-- API responses use `Connection: close`.
+
+All endpoints also support `HEAD` and `OPTIONS`. API responses use `Connection: close`.
 
 ## API Endpoints
 
@@ -76,13 +74,13 @@ Creates a new Fernet key file.
 
 - Auth: local-device only (no API key required)
 - Body (JSON object):
-  	- `directory_path` (string, optional): absolute path to an existing directory where the key file should be created. If omitted, defaults to the repository root. The chosen directory must be permitted by the server policy (`allowed_roots` / `blacklisted_roots`).
-  	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
+	- `directory_path` (string, optional): absolute path to an existing directory where the key file should be created. If omitted, defaults to the repository root. The chosen directory must be permitted by the server policy (`allowed_roots` / `blacklisted_roots`).
+	- `file_name` (string, required): file name only (not a path). Must not already exist in `directory_path`.
 - Returns:
-  	- `201` -> `{ "status": "created", "file_name": "mykey.key" }`
-  	- `400` -> `{ "error": "Request body must be a JSON object." }`
-  	- `400` -> `{ "error": "<validation-message>" }`
-  	- `500` -> `{ "error": "Failed to create key file" }`
+	- `201` -> `{ "status": "created", "file_name": "mykey.key" }`
+	- `400` -> `{ "error": "Request body must be a JSON object." }`
+	- `400` -> `{ "error": "Invalid request payload" }`
+	- `500` -> `{ "error": "Failed to create key file" }`
 
 ### `POST /api/encrypt` (also `HEAD`, `OPTIONS`)
 Queues one encryption task executed in a background thread.
@@ -99,17 +97,9 @@ Queues one encryption task executed in a background thread.
 	- Requirement rule: when `encrypt_file_name` is `false` and `overwrite_file` is `false`, `output_file_path` or `output_file_paths` is required.
 	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
 - Returns:
-	- `202` ->
-		```json
-		{
-			"task_id": "<uuid>",
-			"status": "queued",
-			"operation": "encrypt",
-			"file_count": 2
-		}
-		```
+	- `202` -> `{ "task_id": "...", "status": "queued", "operation": "encrypt", "file_count": 1 }`
 	- `400` -> `{ "error": "Request body must be a JSON object." }`
-	- `400` -> `{ "error": "<validation-message>" }`
+	- `400` -> `{ "error": "Invalid request payload" }`
 	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
 
 ### `POST /api/decrypt` (also `HEAD`, `OPTIONS`)
@@ -128,17 +118,9 @@ Queues one decryption task executed in a background thread.
 	- Output path safety: input, key and output paths must be permitted by the server policy defined by `allowed_roots` and `blacklisted_roots` in `resources/configuration.json`. If `allowed_roots` is non-empty, only paths inside those roots are permitted. If `allowed_roots` is empty but `blacklisted_roots` contains entries, any path inside a blacklisted root is forbidden. If both lists are empty, all paths are permitted. If `overwrite_file` is `false`, output paths must not already exist.
 	- Note: the file referenced by `key_path` must not be included in the `file_path`/`file_paths` input or in `output_file_path`/`output_file_paths`. The server will reject requests that attempt to process the key file itself.
 - Returns:
-	- `202` ->
-		```json
-		{
-			"task_id": "<uuid>",
-			"status": "queued",
-			"operation": "decrypt",
-			"file_count": 1
-		}
-		```
+	- `202` -> `{ "task_id": "...", "status": "queued", "operation": "decrypt", "file_count": 1 }`
 	- `400` -> `{ "error": "Request body must be a JSON object." }`
-	- `400` -> `{ "error": "<validation-message>" }`
+	- `400` -> `{ "error": "Invalid request payload" }`
 	- `500` -> `{ "error": "Could not start the background worker. The server may be under heavy load." }`
 
 ### `GET /api/task/<task_id>` (also `HEAD`, `OPTIONS`)
@@ -148,20 +130,12 @@ Returns current task state and final result or error once finished.
 - Path parameters:
 	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
 - Returns:
-	- `200` -> (for `queued`, `in_progress`)
+	- `200` ->
 		```json
 		{
 			"task_id": "<uuid>",
 			"operation": "encrypt",
-			"status": "queued|in_progress"
-		}
-		```
-	- `200` -> (for `completed` tasks)
-		```json
-		{
-			"task_id": "<uuid>",
-			"operation": "encrypt",
-			"status": "completed",
+			"status": "queued|in_progress|completed",
 			"result": {
 				"operation": "encrypt",
 				"file_count": 1,
@@ -171,7 +145,7 @@ Returns current task state and final result or error once finished.
 			}
 		}
 		```
-	- `500` -> (for `failed` tasks)
+	- `500` ->
 		```json
 		{
 			"task_id": "<uuid>",
@@ -181,18 +155,12 @@ Returns current task state and final result or error once finished.
 			"error_detail": "<short exception message>"
 		}
 		```
-	Notes:
+	- `404` -> `{ "error": "Task not found." }`
+- Notes:
 	- `result` is present only for completed tasks; `error` (and `error_detail`) only for failed tasks.
 	- When `encrypt_file_name` or `decrypt_file_name` is `true`, each file entry uses `input_path` and `output_path` with absolute paths instead of the name-only fields.
-	- When filename transformation is disabled, each file entry returns `input_name` and `output_name`; `output_name` matches the requested output file name or the final renamed file when `overwrite_file` is used.
-	- The `error_detail` field contains a short exception message intended to help debug local failures (for example, permission denied caused by file syncing software). It may contain non-sensitive filesystem info.
-
-	Troubleshooting permission errors:
-	- On Windows, background sync services (OneDrive) or antivirus can temporarily lock files and cause `Permission denied` when the server attempts to replace or rename files. If you see permission errors in `error_detail`:
-		- Pause OneDrive or move the file to a non-synced folder and retry.
-		- Alternatively, provide an explicit `output_file_path` instead of `overwrite_file`, or run the command against a copy of the file.
-	- The server will retry atomic replaces and falls back to copy-based moves, but transient locks can still cause failures.
-	- `404` -> `{ "error": "Task not found." }`
+	- When filename transformation is disabled, each file entry returns `input_name` and `output_name`.
+	- `error_detail` contains a short exception message intended to help debug local failures (e.g., permission denied caused by file syncing software).
 
 ### `GET /api/health` (also `HEAD`, `OPTIONS`)
 Service and queue health snapshot.
@@ -200,35 +168,16 @@ Service and queue health snapshot.
 - Auth: local-device only (no API key required)
 - Body: none
 - Returns:
-	- `200` ->
-		```json
-		{
-			"status": "ok",
-			"service": "Cipher",
-			"bind_address": "127.0.0.1",
-			"port": 49158,
-			"hostname": "...",
-			"pid": 12345,
-			"task_counts": {
-				"queued": 0,
-				"in_progress": 0,
-				"completed": 0,
-				"failed": 0,
-				"total": 0
-			},
-			"task_retention_minutes": 30,
-			"task_cleanup_interval_seconds": 60,
-			"cipher_algorithm": "fernet"
-		}
-		```
-
----
+	- `200` -> `{ "status": "ok", "service": "Cipher", "bind_address": "127.0.0.1", "port": 49158, "hostname": "...", "pid": 12345, "task_counts": { "queued": 0, "in_progress": 0, "completed": 0, "failed": 0, "total": 0 }, "task_retention_minutes": 30, "task_cleanup_interval_seconds": 60, "cipher_algorithm": "fernet" }`
 
 ## Support
-- Open an issue on [GitHub](https://github.com/LorenBll/Cipher/issues) for bug reports, feature requests, or help.
+
+Open an issue on [GitHub](https://github.com/LorenBll/Cipher/issues) for bug reports, feature requests, or help.
 
 ## License
-- [LICENSE](LICENSE)
+
+[LICENSE](LICENSE)
 
 ## Author
-- [LorenBll](https://github.com/LorenBll)
+
+[LorenBll](https://github.com/LorenBll)
