@@ -1113,6 +1113,103 @@ def api_health() -> tuple[Any, int]:
     )
 
 
+def _register_endpoints_with_servicehandler() -> None:
+    """Register this service's API endpoints with ServiceHandler."""
+    global SERVICEHANDLER_HASH
+    if not SERVICEHANDLER_HASH:
+        return
+
+    try:
+        config = _load_configuration()
+    except Exception:
+        config = {}
+    sh_port = config.get("servicehandlerPort", 49155)
+
+    endpoints = [
+        {
+            "verb": "POST",
+            "path": "/api/key",
+            "path_variables": [],
+            "body_schema": {
+                "type": "object",
+                "properties": {
+                    "directory_path": {"type": "string", "description": "Absolute path to an existing directory for the key file."},
+                    "file_name": {"type": "string", "description": "File name for the key (not a path)."}
+                },
+                "required": ["file_name"]
+            },
+            "description": "Create a new Fernet key file.",
+        },
+        {
+            "verb": "POST",
+            "path": "/api/encrypt",
+            "path_variables": [],
+            "body_schema": {
+                "type": "object",
+                "properties": {
+                    "key_path": {"type": "string", "description": "Absolute path to existing key file."},
+                    "file_path": {"type": "string", "description": "Absolute path of file to encrypt."},
+                    "encrypt_file_name": {"type": "boolean", "description": "Encrypt the file name itself."}
+                },
+                "required": ["key_path", "file_path", "encrypt_file_name"]
+            },
+            "description": "Queue an encryption task to run in the background.",
+        },
+        {
+            "verb": "POST",
+            "path": "/api/decrypt",
+            "path_variables": [],
+            "body_schema": {
+                "type": "object",
+                "properties": {
+                    "key_path": {"type": "string", "description": "Absolute path to existing key file."},
+                    "file_path": {"type": "string", "description": "Absolute path of file to decrypt."},
+                    "decrypt_file_name": {"type": "boolean", "description": "Decrypt the file name itself."}
+                },
+                "required": ["key_path", "file_path", "decrypt_file_name"]
+            },
+            "description": "Queue a decryption task to run in the background.",
+        },
+        {
+            "verb": "GET",
+            "path": "/api/task/<task_id>",
+            "path_variables": ["task_id"],
+            "body_schema": {},
+            "description": "Return the current status and result of a queued cipher task.",
+        },
+        {
+            "verb": "GET",
+            "path": "/api/health",
+            "path_variables": [],
+            "body_schema": {},
+            "description": "Service health check with task queue statistics.",
+        },
+    ]
+
+    for ep in endpoints:
+        try:
+            payload = json.dumps({
+                "hash": SERVICEHANDLER_HASH,
+                **ep
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{sh_port}/api/register/endpoint",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 201:
+                    logger.info(f"Registered endpoint: {ep['verb']} {ep['path']}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                logger.debug(f"Endpoint already registered: {ep['verb']} {ep['path']}")
+            else:
+                logger.warning(f"Failed to register endpoint {ep['verb']} {ep['path']} (HTTP {exc.code})")
+        except Exception as exc:
+            logger.warning(f"Failed to register endpoint {ep['verb']} {ep['path']}: {exc}")
+
+
 def _servicehandler_keepalive_forever() -> None:
     global SERVICEHANDLER_HASH
     try:
@@ -1164,6 +1261,8 @@ def _servicehandler_keepalive_forever() -> None:
                     data = json.loads(resp.read().decode("utf-8"))
                     SERVICEHANDLER_HASH = data.get("hash")
                     logger.info(f"Registered with ServiceHandler, hash={SERVICEHANDLER_HASH[:16]}...")
+                    if SERVICEHANDLER_HASH:
+                        _register_endpoints_with_servicehandler()
         except Exception as exc:
             logger.warning(f"ServiceHandler registration attempt failed: {exc}")
 
