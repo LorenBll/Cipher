@@ -208,6 +208,7 @@ Service and queue health snapshot.
 			"bind_address": "127.0.0.1",
 			"port": 49158,
 			"hostname": "...",
+			"pid": 12345,
 			"task_counts": {
 				"queued": 0,
 				"in_progress": 0,
