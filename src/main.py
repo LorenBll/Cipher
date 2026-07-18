@@ -23,9 +23,7 @@ import tempfile
 from flask import Flask, jsonify, request
 import traceback
 import shutil
-import uuid
 import errno
-import time as _time
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +35,16 @@ ALLOWED_ROOTS: list[Path] = []
 BLACKLISTED_ROOTS: list[Path] = []
 
 SERVICEHANDLER_HASH: str | None = None
+
+_config_cache: dict[str, Any] | None = None
+
+_local_addresses_cache: set[str] | None = None
+_local_addresses_cache_ts: float = 0.0
+_LOCAL_ADDRESSES_CACHE_TTL: float = 300.0
+
+_local_ips_cache: list[str] | None = None
+_local_ips_cache_ts: float = 0.0
+_LOCAL_IPS_CACHE_TTL: float = 300.0
 
 try:
     TASK_RETENTION_MINUTES = int(os.getenv("TASK_RETENTION_MINUTES", "30"))
@@ -54,6 +62,11 @@ app = Flask(__name__)
 
 
 def _get_local_device_addresses() -> set[str]:
+    global _local_addresses_cache, _local_addresses_cache_ts
+    now = time.time()
+    if _local_addresses_cache is not None and (now - _local_addresses_cache_ts) < _LOCAL_ADDRESSES_CACHE_TTL:
+        return _local_addresses_cache
+
     local_addresses: set[str] = set()
     candidate_names = {socket.gethostname(), socket.getfqdn()}
 
@@ -90,6 +103,8 @@ def _get_local_device_addresses() -> set[str]:
             continue
 
     normalized_addresses.update({"127.0.0.1", "::1"})
+    _local_addresses_cache = normalized_addresses
+    _local_addresses_cache_ts = now
     return normalized_addresses
 
 
@@ -155,15 +170,18 @@ def _utc_iso() -> str:
 
 
 def _load_configuration() -> dict[str, Any]:
-    """Load configuration from resources/configuration.json."""
+    """Load configuration from resources/configuration.json (cached)."""
+    global _config_cache
+    if _config_cache is not None:
+        return _config_cache
+
     if not CONFIG_PATH.exists():
-        # Avoid exposing full filesystem paths in exception messages.
         logger.debug("Configuration file missing: %s", CONFIG_PATH)
         raise FileNotFoundError("Configuration file not found. Ensure configuration.json exists.")
 
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as config_file:
-            config = json.load(config_file)
+            _config_cache = json.load(config_file)
     except json.JSONDecodeError as exc:
         logger.debug("Invalid JSON in configuration file %s: %s", CONFIG_PATH, exc)
         raise ValueError("Configuration file contains invalid JSON") from exc
@@ -171,7 +189,7 @@ def _load_configuration() -> dict[str, Any]:
         logger.debug("Failed to read configuration file %s: %s", CONFIG_PATH, exc)
         raise RuntimeError("Failed to read configuration file") from exc
 
-    return config
+    return _config_cache
 
 
 def _is_within_any_directory(child: Path, parents: list[Path]) -> bool:
@@ -257,7 +275,12 @@ def _is_path_permitted(path: Path) -> bool:
 
 
 def _collect_local_ip_addresses() -> list[str]:
-    """Gather the IPv4 addresses resolved for the local machine."""
+    """Gather the IPv4 addresses resolved for the local machine (cached)."""
+    global _local_ips_cache, _local_ips_cache_ts
+    now = time.time()
+    if _local_ips_cache is not None and (now - _local_ips_cache_ts) < _LOCAL_IPS_CACHE_TTL:
+        return _local_ips_cache
+
     addresses: set[str] = {"127.0.0.1"}
     hostnames = {socket.gethostname(), socket.getfqdn(), "localhost"}
 
@@ -283,7 +306,9 @@ def _collect_local_ip_addresses() -> list[str]:
         except OSError:
             continue
 
-    return sorted(addresses, key=_sort_ip_address)
+    _local_ips_cache = sorted(addresses, key=_sort_ip_address)
+    _local_ips_cache_ts = now
+    return _local_ips_cache
 
 
 def _is_ipv4_address(value: object) -> bool:
@@ -601,10 +626,7 @@ def _replace_with_retries(src: Path, dest: Path, attempts: int = 5, delay: float
             else:
                 raise
 
-        # Try os.replace as an alternative
         try:
-            import os
-
             os.replace(str(src), str(dest))
             return
         except Exception as exc:
@@ -618,7 +640,7 @@ def _replace_with_retries(src: Path, dest: Path, attempts: int = 5, delay: float
         except Exception as exc:
             last_exc = exc
 
-        _time.sleep(delay)
+        time.sleep(delay)
 
     # If we reach here, all attempts failed; raise the last seen exception
     if last_exc:
@@ -636,8 +658,6 @@ def _safe_rename_with_retries(src: Path, dest: Path, attempts: int = 5, delay: f
             last_exc = exc
 
         try:
-            import os
-
             os.replace(str(src), str(dest))
             return
         except Exception as exc:
@@ -651,7 +671,7 @@ def _safe_rename_with_retries(src: Path, dest: Path, attempts: int = 5, delay: f
         except Exception as exc:
             last_exc = exc
 
-        _time.sleep(delay)
+        time.sleep(delay)
 
     if last_exc:
         raise last_exc
@@ -760,18 +780,23 @@ def _cipher_worker(
         fernet = _load_fernet(key_path)
         processed_files: list[dict[str, str]] = []
 
+        if operation == "encrypt":
+            _transform_name = _encrypted_file_name
+            _process_file = _stream_encrypt_file
+        elif operation == "decrypt":
+            _transform_name = _decrypted_file_name
+            _process_file = _stream_decrypt_file
+        else:
+            raise ValueError(f"Unsupported operation: {operation}")
+
         for index, source_path in enumerate(file_paths):
             requested_output_path = output_paths[index] if output_paths else None
+            source_resolved = source_path.resolve(strict=False)
 
             if requested_output_path is not None:
                 target_output_path = requested_output_path
             elif transform_file_name:
-                if operation == "encrypt":
-                    output_name = _encrypted_file_name(source_path.name, fernet)
-                elif operation == "decrypt":
-                    output_name = _decrypted_file_name(source_path.name, fernet)
-                else:
-                    raise ValueError(f"Unsupported operation: {operation}")
+                output_name = _transform_name(source_path.name, fernet)
                 target_output_path = _resolve_unique_path(source_path.parent, output_name)
             elif overwrite_source_file:
                 target_output_path = source_path
@@ -779,41 +804,28 @@ def _cipher_worker(
                 raise ValueError("Missing output file path for non-filename transformation")
 
             if overwrite_source_file:
-                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False) and target_output_path.exists():
+                target_resolved = target_output_path.resolve(strict=False)
+                if target_resolved != source_resolved and target_output_path.exists():
                     raise ValueError("Requested output path already exists")
 
-                # Overwrite mode writes back to the source file first, then
-                # optionally renames that updated source to the requested output.
-                if operation == "encrypt":
-                    _stream_encrypt_file(source_path, source_path, fernet)
-                elif operation == "decrypt":
-                    _stream_decrypt_file(source_path, source_path, fernet)
-                else:
-                    raise ValueError(f"Unsupported operation: {operation}")
+                _process_file(source_path, source_path, fernet)
 
-                if target_output_path.resolve(strict=False) != source_path.resolve(strict=False):
+                if target_resolved != source_resolved:
                     _safe_rename_with_retries(source_path, target_output_path)
                     output_path = target_output_path
                 else:
                     output_path = source_path
             else:
-                # Stream the file to avoid high memory usage on large files.
                 if target_output_path.exists():
                     raise ValueError("Requested output path already exists")
 
-                if operation == "encrypt":
-                    _stream_encrypt_file(source_path, target_output_path, fernet)
-                elif operation == "decrypt":
-                    _stream_decrypt_file(source_path, target_output_path, fernet)
-                else:
-                    raise ValueError(f"Unsupported operation: {operation}")
-
+                _process_file(source_path, target_output_path, fernet)
                 output_path = target_output_path
 
             if transform_file_name:
                 processed_files.append(
                     {
-                        "input_path": str(source_path.resolve()),
+                        "input_path": str(source_resolved),
                         "output_path": str(output_path.resolve()),
                     }
                 )
@@ -895,18 +907,35 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
         if not _is_path_permitted(p):
             return _error_response("All file paths must be permitted by server policy.", 400)
 
+    # Pre-resolve all paths once to avoid repeated filesystem calls
+    try:
+        key_resolved = key_path.resolve(strict=False)
+    except Exception:
+        key_resolved = key_path
+
+    file_paths_resolved = []
+    for p in file_paths:
+        try:
+            file_paths_resolved.append(p.resolve(strict=False))
+        except Exception:
+            file_paths_resolved.append(p)
+
+    output_paths_resolved = None
     if output_paths:
-        for source_path, output_path in zip(file_paths, output_paths):
-            if not _is_path_permitted(output_path):
+        output_paths_resolved = []
+        for out in output_paths:
+            try:
+                output_paths_resolved.append(out.resolve(strict=False))
+            except Exception:
+                output_paths_resolved.append(out)
+
+        for source_resolved, output_resolved in zip(file_paths_resolved, output_paths_resolved):
+            if not _is_path_permitted(output_resolved):
                 return _error_response(
                     "All output file paths must be permitted by server policy.",
                     400,
                 )
-
-            if (
-                not overwrite_source_file
-                and output_path.resolve(strict=False) == source_path.resolve(strict=False)
-            ):
+            if not overwrite_source_file and output_resolved == source_resolved:
                 return _error_response(
                     "output_file_path cannot match the input file path unless overwrite_file is true.",
                     400,
@@ -915,25 +944,14 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
     # SECURITY: Prevent the provided key file from being processed as an
     # input or output file. Encrypting or decrypting the key file itself
     # would corrupt the key material and is not allowed.
-    try:
-        key_resolved = key_path.resolve(strict=False)
-    except Exception:
-        key_resolved = key_path
+    for p_resolved in file_paths_resolved:
+        if p_resolved == key_resolved:
+            return _error_response("The key file may not be used as an input file.", 400)
 
-    for p in file_paths:
-        try:
-            if p.resolve(strict=False) == key_resolved:
-                return _error_response("The key file may not be used as an input file.", 400)
-        except Exception:
-            continue
-
-    if output_paths:
-        for out in output_paths:
-            try:
-                if out.resolve(strict=False) == key_resolved:
-                    return _error_response("The key file may not be used as an output file.", 400)
-            except Exception:
-                continue
+    if output_paths_resolved:
+        for out_resolved in output_paths_resolved:
+            if out_resolved == key_resolved:
+                return _error_response("The key file may not be used as an output file.", 400)
 
     task = _create_task(operation, key_path, file_paths)
 
