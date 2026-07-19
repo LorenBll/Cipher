@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 
 from cryptography.fernet import Fernet, InvalidToken
+from models import GetRequest, GetResponse, PostRequest, PostResponse
 import struct
 import tempfile
 from flask import Flask, jsonify, request
@@ -1132,6 +1133,67 @@ def api_health() -> tuple[Any, int]:
     )
 
 
+def _send_get_request(request: GetRequest) -> GetResponse:
+    """Send a GET request and return a normalized response."""
+    try:
+        req = urllib.request.Request(
+            request.url,
+            headers=request.headers,
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=request.timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return GetResponse(
+                status_code=resp.status,
+                reason=resp.reason,
+                body=body,
+                body_size=len(body),
+                headers=dict(resp.headers),
+                json_body=json.loads(body) if body else None,
+            )
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return GetResponse(
+            status_code=exc.code,
+            reason=exc.reason,
+            body=body,
+            body_size=len(body),
+            headers=dict(exc.headers),
+            json_body=json.loads(body) if body else None,
+        )
+
+
+def _send_post_request(request: PostRequest) -> PostResponse:
+    """Send a POST request and return a normalized response."""
+    try:
+        req = urllib.request.Request(
+            request.url,
+            data=request.body,
+            headers=request.headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=request.timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return PostResponse(
+                status_code=resp.status,
+                reason=resp.reason,
+                body=body,
+                body_size=len(body),
+                headers=dict(resp.headers),
+                json_body=json.loads(body) if body else None,
+            )
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return PostResponse(
+            status_code=exc.code,
+            reason=exc.reason,
+            body=body,
+            body_size=len(body),
+            headers=dict(exc.headers),
+            json_body=json.loads(body) if body else None,
+        )
+
+
 def _register_endpoints_with_servicehandler() -> None:
     """Register this service's API endpoints with ServiceHandler."""
     global SERVICEHANDLER_HASH
@@ -1207,24 +1269,19 @@ def _register_endpoints_with_servicehandler() -> None:
 
     for ep in endpoints:
         try:
-            payload = json.dumps({
-                "hash": SERVICEHANDLER_HASH,
-                **ep
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{sh_port}/api/register/endpoint",
-                data=payload,
+            request = PostRequest(
+                url=f"http://127.0.0.1:{sh_port}/api/register/endpoint",
+                body=json.dumps({"hash": SERVICEHANDLER_HASH, **ep}).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
-                method="POST",
+                timeout=10,
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 201:
-                    logger.info(f"Registered endpoint: {ep['verb']} {ep['path']}")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 409:
+            response = _send_post_request(request)
+            if response.status_code == 201:
+                logger.info(f"Registered endpoint: {ep['verb']} {ep['path']}")
+            elif response.status_code == 409:
                 logger.debug(f"Endpoint already registered: {ep['verb']} {ep['path']}")
             else:
-                logger.warning(f"Failed to register endpoint {ep['verb']} {ep['path']} (HTTP {exc.code})")
+                logger.warning(f"Failed to register endpoint {ep['verb']} {ep['path']} (HTTP {response.status_code})")
         except Exception as exc:
             logger.warning(f"Failed to register endpoint {ep['verb']} {ep['path']}: {exc}")
 
@@ -1241,46 +1298,41 @@ def _servicehandler_keepalive_forever() -> None:
     while True:
         time.sleep(15)
         try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{ph_port}/api/question/service",
-                data=json.dumps({"name": service_name}).encode("utf-8"),
+            request = PostRequest(
+                url=f"http://127.0.0.1:{ph_port}/api/question/service",
+                body=json.dumps({"name": service_name}).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
-                method="POST",
+                timeout=10,
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 200:
-                    continue
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:
-                logger.warning(f"ServiceHandler question failed (HTTP {exc.code})")
+            response = _send_post_request(request)
+            if response.status_code == 200:
+                continue
+            if response.status_code != 404:
+                logger.warning(f"ServiceHandler question failed (HTTP {response.status_code})")
                 continue
         except Exception as exc:
             logger.warning(f"ServiceHandler question failed: {exc}")
             continue
 
         try:
-            payload = json.dumps({
-                "name": service_name,
-                "port": SERVICE_PORT,
-                "starting_script": str(Path(__file__).resolve().parent.parent / "scripts" / ("run.bat" if os.name == "nt" else "run.sh")),
-                "bind_address": SERVICE_BIND_ADDRESS,
-                "hostname": socket.gethostname(),
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{ph_port}/api/register/service",
-                data=payload,
+            request = PostRequest(
+                url=f"http://127.0.0.1:{ph_port}/api/register/service",
+                body=json.dumps({
+                    "name": service_name,
+                    "port": SERVICE_PORT,
+                    "starting_script": str(Path(__file__).resolve().parent.parent / "scripts" / ("run.bat" if os.name == "nt" else "run.sh")),
+                    "bind_address": SERVICE_BIND_ADDRESS,
+                    "hostname": socket.gethostname(),
+                }).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
-                method="POST",
+                timeout=10,
             )
-
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 201:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    SERVICEHANDLER_HASH = data.get("hash")
-                    logger.info(f"Registered with ServiceHandler, hash={SERVICEHANDLER_HASH[:16]}...")
-                    if SERVICEHANDLER_HASH:
-                        _register_endpoints_with_servicehandler()
+            response = _send_post_request(request)
+            if response.status_code == 201 and isinstance(response.json_body, dict):
+                SERVICEHANDLER_HASH = response.json_body.get("hash")
+                logger.info(f"Registered with ServiceHandler, hash={SERVICEHANDLER_HASH[:16]}...")
+                if SERVICEHANDLER_HASH:
+                    _register_endpoints_with_servicehandler()
         except Exception as exc:
             logger.warning(f"ServiceHandler registration attempt failed: {exc}")
 
