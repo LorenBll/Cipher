@@ -151,7 +151,7 @@ Returns current task state and final result or error once finished.
 			"task_id": "<uuid>",
 			"operation": "encrypt",
 			"status": "failed",
-			"error": "Task failed during processing",
+			"error": "<failure-reason>",
 			"error_detail": "<short exception message>"
 		}
 		```
