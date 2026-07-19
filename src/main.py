@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 
 from cryptography.fernet import Fernet, InvalidToken
-from models import GetRequest, GetResponse, PostRequest, PostResponse
+from models import PostRequest, PostResponse
 import struct
 import tempfile
 from flask import Flask, jsonify, request
@@ -42,10 +42,6 @@ _config_cache: dict[str, Any] | None = None
 _local_addresses_cache: set[str] | None = None
 _local_addresses_cache_ts: float = 0.0
 _LOCAL_ADDRESSES_CACHE_TTL: float = 300.0
-
-_local_ips_cache: list[str] | None = None
-_local_ips_cache_ts: float = 0.0
-_LOCAL_IPS_CACHE_TTL: float = 300.0
 
 try:
     TASK_RETENTION_MINUTES = int(os.getenv("TASK_RETENTION_MINUTES", "30"))
@@ -275,78 +271,6 @@ def _is_path_permitted(path: Path) -> bool:
     return True
 
 
-def _collect_local_ip_addresses() -> list[str]:
-    """Gather the IPv4 addresses resolved for the local machine (cached)."""
-    global _local_ips_cache, _local_ips_cache_ts
-    now = time.time()
-    if _local_ips_cache is not None and (now - _local_ips_cache_ts) < _LOCAL_IPS_CACHE_TTL:
-        return _local_ips_cache
-
-    addresses: set[str] = {"127.0.0.1"}
-    hostnames = {socket.gethostname(), socket.getfqdn(), "localhost"}
-
-    for hostname in hostnames:
-        if not hostname:
-            continue
-
-        try:
-            _, _, resolved_addresses = socket.gethostbyname_ex(hostname)
-        except OSError:
-            resolved_addresses = []
-
-        for address in resolved_addresses:
-            if _is_ipv4_address(address):
-                addresses.add(address)
-
-        try:
-            for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, None):
-                if family == socket.AF_INET and sockaddr:
-                    candidate = sockaddr[0]
-                    if _is_ipv4_address(candidate):
-                        addresses.add(candidate)
-        except OSError:
-            continue
-
-    _local_ips_cache = sorted(addresses, key=_sort_ip_address)
-    _local_ips_cache_ts = now
-    return _local_ips_cache
-
-
-def _is_ipv4_address(value: object) -> bool:
-    """Check whether a value is a valid IPv4 address string."""
-    if not isinstance(value, str):
-        return False
-
-    parts = value.strip().split(".")
-    if len(parts) != 4:
-        return False
-
-    try:
-        return all(0 <= int(part) <= 255 for part in parts)
-    except ValueError:
-        return False
-
-
-def _sort_ip_address(value: str) -> tuple[int, int, int, int]:
-    """Sort IP addresses numerically while keeping loopback near the front."""
-    parts = value.split(".")
-    if len(parts) != 4:
-        return (255, 255, 255, 255)
-
-    try:
-        return tuple(int(part) for part in parts)  # type: ignore[return-value]
-    except ValueError:
-        return (255, 255, 255, 255)
-
-
-def _get_primary_ip() -> str:
-    """Return the first non-loopback IPv4 address, or loopback as a fallback."""
-    for address in _collect_local_ip_addresses():
-        if address != "127.0.0.1":
-            return address
-    return "127.0.0.1"
-
-
 def _ensure_cleanup_thread_started() -> None:
     """Start cleanup thread exactly once."""
     global cleanup_thread_started
@@ -528,11 +452,6 @@ def _load_fernet(key_path: Path) -> Fernet:
     return Fernet(key_bytes)
 
 
-def _encryption_output_path(source_path: Path) -> Path:
-    """Build an output path for encrypted files."""
-    return _resolve_unique_path(source_path.parent, f"{source_path.name}.fernet")
-
-
 # Streaming format constants
 # Magic header to identify files encrypted with chunked Fernet format
 _CHUNKED_MAGIC = b"FRTN1"
@@ -681,20 +600,6 @@ def _safe_rename_with_retries(src: Path, dest: Path, attempts: int = 5, delay: f
 def _encrypted_file_name(source_name: str, fernet: Fernet) -> str:
     """Encrypt a file name using the provided Fernet instance."""
     return fernet.encrypt(source_name.encode("utf-8")).decode("ascii")
-
-
-def _decryption_output_path(source_path: Path) -> Path:
-    """Build an output path for decrypted files."""
-    if source_path.name.endswith(".fernet"):
-        return _resolve_unique_path(
-            source_path.parent,
-            source_path.name[: -len(".fernet")],
-        )
-
-    return _resolve_unique_path(
-        source_path.parent,
-        f"{source_path.name}.decrypted",
-    )
 
 
 def _decrypted_file_name(source_name: str, fernet: Fernet) -> str:
@@ -1131,36 +1036,6 @@ def api_health() -> tuple[Any, int]:
         ),
         200,
     )
-
-
-def _send_get_request(request: GetRequest) -> GetResponse:
-    """Send a GET request and return a normalized response."""
-    try:
-        req = urllib.request.Request(
-            request.url,
-            headers=request.headers,
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=request.timeout) as resp:
-            body = resp.read().decode("utf-8")
-            return GetResponse(
-                status_code=resp.status,
-                reason=resp.reason,
-                body=body,
-                body_size=len(body),
-                headers=dict(resp.headers),
-                json_body=json.loads(body) if body else None,
-            )
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return GetResponse(
-            status_code=exc.code,
-            reason=exc.reason,
-            body=body,
-            body_size=len(body),
-            headers=dict(exc.headers),
-            json_body=json.loads(body) if body else None,
-        )
 
 
 def _send_post_request(request: PostRequest) -> PostResponse:
