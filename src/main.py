@@ -1181,6 +1181,8 @@ def _servicehandler_keepalive_forever() -> None:
             )
             response = _send_post_request(request)
             if response.status_code == 200:
+                if not SERVICEHANDLER_HASH and isinstance(response.json_body, dict):
+                    SERVICEHANDLER_HASH = response.json_body.get("hash")
                 continue
             if response.status_code != 404:
                 logger.warning(f"ServiceHandler question failed (HTTP {response.status_code})")
