@@ -885,6 +885,7 @@ def _queue_cipher_task(operation: str) -> tuple[Any, int]:
             500,
         )
 
+    logger.info("Task queued: %s %s (%d file(s))", operation, task["task_id"], len(file_paths))
     response_body: dict[str, Any] = {
         "task_id": task["task_id"],
         "status": "queued",
@@ -931,7 +932,7 @@ def create_key() -> tuple[Any, int]:
         logger.debug("OS error creating key file: %s", exc, exc_info=True)
         return _error_response("Failed to create key file", 500)
 
-    # Return only non-sensitive information about the created key.
+    logger.info("Key file created: %s in %s", file_name, directory_path)
     return (
         jsonify({"status": "created", "file_name": file_name}),
         201,
@@ -1019,6 +1020,7 @@ def api_health() -> tuple[Any, int]:
         if status in counts:
             counts[status] += 1
 
+    logger.info("Health check: %d tasks (%d queued, %d in_progress, %d completed, %d failed)", counts["total"], counts["queued"], counts["in_progress"], counts["completed"], counts["failed"])
     return (
         jsonify(
             {
@@ -1218,7 +1220,7 @@ if __name__ == "__main__":
     try:
         logging.basicConfig(
             level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         )
 
         _initialize_service_config()

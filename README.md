@@ -3,8 +3,9 @@
 Cipher is a local file encryption and decryption service. It solves the problem of safely creating Fernet keys and processing file encryption or decryption jobs through a small HTTP API.
 
 ## About
-
 Cipher is scoped to local file operations and keeps task state in memory while background workers process queued jobs. The service binds to `127.0.0.1` on port `49158` and rejects API calls that do not come from the local device.
+
+**Features:**
 
 - **Fernet Key Creation** — generate and save a Fernet symmetric key file to any permitted directory.
 - **File Encryption / Decryption** — queue background encryption or decryption tasks for one or more files with a single API call.
@@ -13,65 +14,47 @@ Cipher is scoped to local file operations and keeps task state in memory while b
 - **Overwrite Mode** — replace source files in-place with their encrypted or decrypted content.
 - **Path Policy** — configurable allowlist and blacklist of root directories control which paths the API is permitted to operate on.
 - **Background Task Cleanup** — finished tasks are automatically removed after a configurable retention period.
+- **ServiceHandler Integration** — optionally registers with ServiceHandler for service discovery and endpoint registration.
 
-> **Safety notice**: Cipher is intended only for local, trusted environments. The encryption key file must be kept safe; losing it makes encrypted data unrecoverable.
+> **Safety notice**: Cipher is intended only for local, trusted environments. The encryption key file must be kept safe; losing it makes encrypted data permanently unrecoverable.
 
 ## Setup
-
-1. Install dependencies: run `scripts\setup.bat` (Windows) or `bash scripts/setup.sh` (Unix), or manually `pip install -r requirements.txt`.
-2. Review `resources/configuration.json` to configure `port`, `servicehandlerEnabled`, `servicehandlerPort`, `allowed_roots`, and `blacklisted_roots`.
-   - `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
-   - `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If `allowed_roots` is empty and `blacklisted_roots` is non-empty, any path inside a blacklisted root is forbidden.
-   - Behavior summary:
-     - If `allowed_roots` is non-empty -> only those roots are permitted (blacklist ignored).
-     - Else if `blacklisted_roots` is non-empty -> all paths are permitted except any inside a blacklisted root.
-     - Else (both lists empty) -> all paths on the system are permitted.
-
-   Example `resources/configuration.json`:
-   ```json
-   {
-       "port": 49158,
-       "servicehandlerEnabled": true,
-       "servicehandlerPort": 49155,
-       "allowed_roots": [],
-       "blacklisted_roots": []
-   }
-   ```
+1. Install Python dependencies: `pip install -r requirements.txt`.
+2. Review `resources/configuration.json` to configure `port`, `servicehandlerEnabled`, `servicehandlerPort`, `allowed_roots`, and `blacklisted_roots`. See below for the path policy behaviour.
 3. Leave the project structure intact so the service can find `resources/` and `src/`.
 
-## Run
+### Path Policy
+The path policy uses two lists in `resources/configuration.json`:
+- `allowed_roots`: list of root paths the API is allowed to operate inside. If this list is non-empty, ONLY these roots are permitted and the blacklist is ignored.
+- `blacklisted_roots`: list of root paths that are forbidden when `allowed_roots` is empty. If both lists are empty, all paths on the system are permitted.
 
+Example `resources/configuration.json`:
+```json
+{
+    "port": 49158,
+    "servicehandlerEnabled": true,
+    "servicehandlerPort": 49155,
+    "allowed_roots": [],
+    "blacklisted_roots": []
+}
+```
+
+## Run
 1. Windows: run `scripts\run.bat`.
 2. Unix-like systems: run `bash scripts/run.sh`.
 3. Manual: run `python src/main.py` from the project root.
 
-## Integration
-
-This service can optionally register with [ServiceHandler](https://www.github.com/LorenBll/ServiceHandler) for service discovery, but does not depend on it. Set `servicehandlerEnabled` in `resources/configuration.json` to control this behavior.
-
-When registered, Cipher also registers its API endpoints with ServiceHandler so they can be discovered by other services.
-
-## Auto-Startup
-
-The `deployment/` directory contains platform-specific auto-start configurations:
-
-- **macOS**: `deployment/com.service.plist` — launchd plist. Copy to `~/Library/LaunchAgents/` after updating paths.
-- **Linux**: `deployment/service.service` — systemd unit. Copy to `/etc/systemd/system/` after updating the `User` and paths.
-- **Windows**: `deployment/startup-windows.vbs` — startup script. Place in the Windows Startup folder (`shell:startup`) or schedule as a task.
-
 ## Access Control
 
 All `/api/*` endpoints are local-device only. Requests from non-local addresses are rejected with:
-
 - `403` -> `{ "error": "Local device access only." }`
-
-All endpoints also support `HEAD` and `OPTIONS`. API responses use `Connection: close`.
+- All endpoints also support `HEAD` and `OPTIONS`.
+- API responses use `Connection: close`.
 
 ## API Endpoints
 
 ### `POST /api/key` (also `HEAD`, `OPTIONS`)
 Creates a new Fernet key file.
-
 - Auth: local-device only (no API key required)
 - Body (JSON object):
 	- `directory_path` (string, optional): absolute path to an existing directory where the key file should be created. If omitted, defaults to the repository root. The chosen directory must be permitted by the server policy (`allowed_roots` / `blacklisted_roots`).
@@ -84,7 +67,6 @@ Creates a new Fernet key file.
 
 ### `POST /api/encrypt` (also `HEAD`, `OPTIONS`)
 Queues one encryption task executed in a background thread.
-
 - Auth: local-device only (no API key required)
 - Body (JSON object):
 	- `key_path` (string, required): absolute path to existing key file.
@@ -104,7 +86,6 @@ Queues one encryption task executed in a background thread.
 
 ### `POST /api/decrypt` (also `HEAD`, `OPTIONS`)
 Queues one decryption task executed in a background thread.
-
 - Auth: local-device only (no API key required)
 - Body (JSON object):
 	- `key_path` (string, required): absolute path to existing key file.
@@ -125,7 +106,6 @@ Queues one decryption task executed in a background thread.
 
 ### `GET /api/task/<task_id>` (also `HEAD`, `OPTIONS`)
 Returns current task state and final result or error once finished.
-
 - Auth: local-device only (no API key required)
 - Path parameters:
 	- `task_id` (string, required): task identifier returned by `POST /api/encrypt` or `POST /api/decrypt`.
@@ -164,20 +144,18 @@ Returns current task state and final result or error once finished.
 
 ### `GET /api/health` (also `HEAD`, `OPTIONS`)
 Service and queue health snapshot.
-
 - Auth: local-device only (no API key required)
 - Body: none
 - Returns:
 	- `200` -> `{ "status": "ok", "service": "Cipher", "bind_address": "127.0.0.1", "port": 49158, "hostname": "...", "pid": 12345, "task_counts": { "queued": 0, "in_progress": 0, "completed": 0, "failed": 0, "total": 0 }, "task_retention_minutes": 30, "task_cleanup_interval_seconds": 60, "cipher_algorithm": "fernet" }`
 
-## Support
+---
 
-Open an issue on [GitHub](https://github.com/LorenBll/Cipher/issues) for bug reports, feature requests, or help.
+## Support
+- Open an issue on [GitHub](https://github.com/LorenBll/Cipher/issues) for bug reports, feature requests, or help.
 
 ## License
-
-[LICENSE](LICENSE)
+- [LICENSE](LICENSE)
 
 ## Author
-
-[LorenBll](https://github.com/LorenBll)
+- [LorenBll](https://github.com/LorenBll)
